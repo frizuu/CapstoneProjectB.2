@@ -18,12 +18,12 @@ func main() {
 	redisCache := cache.NewRedisCache()
 
 	// Repository
-	repo         := &repository.TransactionRepo{DB: db}
-	userRepo     := &repository.UserRepo{DB: db}
+	repo := &repository.TransactionRepo{DB: db}
+	userRepo := &repository.UserRepo{DB: db}
 	merchantRepo := &repository.MerchantRepo{DB: db}
 
 	// Handler
-	userHandler     := &handler.UserHandler{UserRepo: userRepo}
+	userHandler := &handler.UserHandler{UserRepo: userRepo}
 	merchantHandler := &handler.MerchantHandler{MerchantRepo: merchantRepo}
 
 	// Service (sekarang menerima DB dan Cache)
@@ -45,7 +45,7 @@ func main() {
 	http.HandleFunc("/qris/payment", h.PaymentQRIS)
 	http.HandleFunc("/merchant/balance", merchantHandler.GetMerchantBalance)
 	http.HandleFunc("/merchants", merchantHandler.GetAllMerchants)
-
+	http.HandleFunc("/transactions", h.GetUserTransactions)
 	println("Server running on :8080")
 	http.ListenAndServe(":8080", nil)
 }

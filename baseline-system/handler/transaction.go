@@ -4,6 +4,7 @@ import (
 	"baseline-system/service"
 	"encoding/json"
 	"net/http"
+	"strconv"
 )
 
 type Handler struct {
@@ -53,4 +54,27 @@ func (h *Handler) PaymentQRIS(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{
 		"status": result,
 	})
+}
+
+func (h *Handler) GetUserTransactions(w http.ResponseWriter, r *http.Request) {
+	userIDStr := r.URL.Query().Get("user_id")
+	if userIDStr == "" {
+		http.Error(w, "user_id is required", http.StatusBadRequest)
+		return
+	}
+
+	userID, err := strconv.Atoi(userIDStr)
+	if err != nil {
+		http.Error(w, "invalid user_id", http.StatusBadRequest)
+		return
+	}
+
+	data, err := h.Service.GetUserTransactions(userID)
+	if err != nil {
+		http.Error(w, "failed to fetch transactions", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(data)
 }

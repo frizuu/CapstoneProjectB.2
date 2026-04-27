@@ -186,3 +186,7 @@ func (s *TransactionService) getUserBalanceWithCache(userID int) (int, error) {
 
 	return balance, nil
 }
+
+func (s *TransactionService) GetUserTransactions(userID int) ([]map[string]interface{}, error) {
+	return s.Repo.GetByUserID(userID)
+}
