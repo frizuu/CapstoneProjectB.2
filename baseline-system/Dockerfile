@@ -2,12 +2,18 @@ FROM golang:1.22-alpine
 
 WORKDIR /app
 
-COPY go.mod go.sum ./
+# Install git (diperlukan untuk go mod tidy)
+RUN apk add --no-cache git
+
+COPY go.mod ./
+
+# Download semua dependency termasuk Redis
 RUN go mod download
 
 COPY . .
 
-RUN go build -o app
+# Tidy dan build
+RUN go mod tidy && go build -o app
 
 EXPOSE 8080
 

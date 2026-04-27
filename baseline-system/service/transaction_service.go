@@ -1,36 +1,188 @@
 package service
 
 import (
+	"baseline-system/cache"
 	"baseline-system/legacy"
 	"baseline-system/repository"
+	"database/sql"
+	"fmt"
+	"strconv"
+	"time"
 )
 
 type TransactionService struct {
-	Repo     *repository.TransactionRepo
-	UserRepo *repository.UserRepo
+	DB           *sql.DB
+	Repo         *repository.TransactionRepo
+	UserRepo     *repository.UserRepo
+	MerchantRepo *repository.MerchantRepo
+	Cache        *cache.RedisCache
 }
 
+// Process - pembayaran umum (existing)
 func (s *TransactionService) Process(userID int, amount int) string {
 
-	balance, err := s.UserRepo.GetBalance(userID)
+	// READ: cek saldo dari cache dulu
+	balance, err := s.getUserBalanceWithCache(userID)
 	if err != nil {
 		return "USER_NOT_FOUND"
 	}
 
-	// 2. Validasi saldo
 	if balance < amount {
 		return "INSUFFICIENT_BALANCE"
 	}
 
-	// 3. Call legacy (masih blocking)
+	// WRITE: Start Transaction
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return "FAILED_START_TRANSACTION"
+	}
+
 	result := legacy.ProcessTransaction()
-
-	// 4. Update saldo
 	newBalance := balance - amount
-	s.UserRepo.UpdateBalance(userID, newBalance)
 
-	// 5. Simpan transaksi
-	s.Repo.Save(userID, amount, result)
+	// Execute Write Query 1: update saldo
+	_, err = tx.Exec(
+		"UPDATE users SET balance=$1 WHERE id=$2",
+		newBalance, userID,
+	)
+	if err != nil {
+		tx.Rollback()
+		return "FAILED"
+	}
+
+	// Execute Write Query 2: simpan transaksi
+	_, err = tx.Exec(
+		"INSERT INTO transactions(user_id, amount, status) VALUES($1,$2,$3)",
+		userID, amount, result,
+	)
+	if err != nil {
+		tx.Rollback()
+		return "FAILED"
+	}
+
+	// Commit
+	if err := tx.Commit(); err != nil {
+		tx.Rollback()
+		return "FAILED"
+	}
+
+	// Update Cache setelah commit berhasil
+	s.Cache.Set(
+		cache.KeyUserBalance(userID),
+		strconv.Itoa(newBalance),
+		10*time.Minute,
+	)
 
 	return result
+}
+
+// ProcessQRIS - pembayaran via QRIS
+func (s *TransactionService) ProcessQRIS(userID int, merchantCode string, amount int) string {
+
+	// READ: cek saldo user dari cache dulu
+	userBalance, err := s.getUserBalanceWithCache(userID)
+	if err != nil {
+		return "USER_NOT_FOUND"
+	}
+
+	if userBalance < amount {
+		return "INSUFFICIENT_BALANCE"
+	}
+
+	// READ: inquiry merchant
+	merchant, err := s.MerchantRepo.GetByCode(merchantCode)
+	if err != nil {
+		return "MERCHANT_NOT_FOUND"
+	}
+
+	// Call legacy processor
+	result := legacy.ProcessTransaction()
+	if result != "SUCCESS" {
+		return result
+	}
+
+	// WRITE: Start Transaction
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return "FAILED_START_TRANSACTION"
+	}
+
+	// Execute Write Query 1: Debit saldo user
+	newUserBalance := userBalance - amount
+	_, err = tx.Exec(
+		"UPDATE users SET balance=$1 WHERE id=$2",
+		newUserBalance, userID,
+	)
+	if err != nil {
+		tx.Rollback()
+		return "FAILED_DEBIT_USER"
+	}
+
+	// Execute Write Query 2: Kredit saldo merchant
+	newMerchantBalance := merchant.Balance + int64(amount)
+	_, err = tx.Exec(
+		"UPDATE merchants SET balance=$1 WHERE id=$2",
+		newMerchantBalance, merchant.ID,
+	)
+	if err != nil {
+		tx.Rollback()
+		return "FAILED_CREDIT_MERCHANT"
+	}
+
+	// Execute Write Query 3: Simpan transaksi
+	_, err = tx.Exec(
+		"INSERT INTO transactions(user_id, amount, status) VALUES($1,$2,$3)",
+		userID, amount, result,
+	)
+	if err != nil {
+		tx.Rollback()
+		return "FAILED_SAVE_TRANSACTION"
+	}
+
+	// Commit semua sekaligus
+	if err := tx.Commit(); err != nil {
+		tx.Rollback()
+		return "FAILED_COMMIT"
+	}
+
+	// Update Cache setelah commit berhasil
+	s.Cache.Set(
+		cache.KeyUserBalance(userID),
+		strconv.Itoa(newUserBalance),
+		10*time.Minute,
+	)
+	s.Cache.Set(
+		cache.KeyMerchantBalance(merchant.ID),
+		fmt.Sprintf("%d", newMerchantBalance),
+		10*time.Minute,
+	)
+
+	return result
+}
+
+// getUserBalanceWithCache - READ dengan cache
+func (s *TransactionService) getUserBalanceWithCache(userID int) (int, error) {
+	// Cek cache dulu
+	cached, err := s.Cache.Get(cache.KeyUserBalance(userID))
+	if err == nil {
+		balance, err := strconv.Atoi(cached)
+		if err == nil {
+			return balance, nil
+		}
+	}
+
+	// Cache miss - ambil dari DB
+	balance, err := s.UserRepo.GetBalance(userID)
+	if err != nil {
+		return 0, err
+	}
+
+	// Simpan ke cache
+	s.Cache.Set(
+		cache.KeyUserBalance(userID),
+		strconv.Itoa(balance),
+		10*time.Minute,
+	)
+
+	return balance, nil
 }
