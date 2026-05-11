@@ -1,8 +1,13 @@
 package model
 
+import "time"
+
 type Transaction struct {
-	ID     int
-	UserID int
-	Amount int
-	Status string
+	ID              int
+	UserID          int
+	MerchantID      int
+	Amount          int
+	Status          string
+	TransactionType string
+	CreatedAt       time.Time
 }

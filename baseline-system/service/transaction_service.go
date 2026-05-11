@@ -1,13 +1,11 @@
 package service
 
 import (
-	"baseline-system/cache"
 	"baseline-system/legacy"
+	"baseline-system/model"
 	"baseline-system/repository"
 	"database/sql"
 	"fmt"
-	"strconv"
-	"time"
 )
 
 type TransactionService struct {
@@ -15,176 +13,133 @@ type TransactionService struct {
 	Repo         *repository.TransactionRepo
 	UserRepo     *repository.UserRepo
 	MerchantRepo *repository.MerchantRepo
-	Cache        *cache.RedisCache
+	AuditRepo    *repository.AuditRepo
+	LedgerRepo   *repository.LedgerRepo
 }
 
-// Process - pembayaran umum (existing)
-func (s *TransactionService) Process(userID int, amount int) string {
+type TransactionResult struct {
+	Status        string `json:"status"`
+	Code          string `json:"code,omitempty"`
+	Message       string `json:"message,omitempty"`
+	TransactionID int    `json:"transaction_id,omitempty"`
+	AuditID       int    `json:"audit_id,omitempty"`
+}
 
-	// READ: cek saldo dari cache dulu
-	balance, err := s.getUserBalanceWithCache(userID)
-	if err != nil {
-		return "USER_NOT_FOUND"
+func (s *TransactionService) Process(userID int, amount int) TransactionResult {
+	req := &legacy.TransactionRequest{
+		Type:   legacy.TypePayment,
+		UserID: userID,
+		Amount: amount,
 	}
+	return s.execute(req)
+}
 
-	if balance < amount {
-		return "INSUFFICIENT_BALANCE"
+func (s *TransactionService) ProcessQRIS(userID int, merchantCode string, amount int) TransactionResult {
+	req := &legacy.TransactionRequest{
+		Type:         legacy.TypeQRIS,
+		UserID:       userID,
+		MerchantCode: merchantCode,
+		Amount:       amount,
 	}
+	return s.execute(req)
+}
 
-	// WRITE: Start Transaction
+func (s *TransactionService) execute(req *legacy.TransactionRequest) TransactionResult {
 	tx, err := s.DB.Begin()
 	if err != nil {
-		return "FAILED_START_TRANSACTION"
+		return TransactionResult{Status: legacy.StatusSystemBusy, Code: "91", Message: "unable to start transaction"}
 	}
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		}
+	}()
 
-	result := legacy.ProcessTransaction()
-	newBalance := balance - amount
-
-	// Execute Write Query 1: update saldo
-	_, err = tx.Exec(
-		"UPDATE users SET balance=$1 WHERE id=$2",
-		newBalance, userID,
-	)
+	user, err := s.UserRepo.GetForUpdate(tx, req.UserID)
 	if err != nil {
-		tx.Rollback()
-		return "FAILED"
+		return TransactionResult{Status: legacy.StatusInvalidInput, Code: "14", Message: "user not found"}
 	}
 
-	// Execute Write Query 2: simpan transaksi
-	_, err = tx.Exec(
-		"INSERT INTO transactions(user_id, amount, status) VALUES($1,$2,$3)",
-		userID, amount, result,
-	)
-	if err != nil {
-		tx.Rollback()
-		return "FAILED"
-	}
-
-	// Commit
-	if err := tx.Commit(); err != nil {
-		tx.Rollback()
-		return "FAILED"
-	}
-
-	// Update Cache setelah commit berhasil
-	s.Cache.Set(
-		cache.KeyUserBalance(userID),
-		strconv.Itoa(newBalance),
-		10*time.Minute,
-	)
-
-	return result
-}
-
-// ProcessQRIS - pembayaran via QRIS
-func (s *TransactionService) ProcessQRIS(userID int, merchantCode string, amount int) string {
-
-	// READ: cek saldo user dari cache dulu
-	userBalance, err := s.getUserBalanceWithCache(userID)
-	if err != nil {
-		return "USER_NOT_FOUND"
-	}
-
-	if userBalance < amount {
-		return "INSUFFICIENT_BALANCE"
-	}
-
-	// READ: inquiry merchant
-	merchant, err := s.MerchantRepo.GetByCode(merchantCode)
-	if err != nil {
-		return "MERCHANT_NOT_FOUND"
-	}
-
-	// Call legacy processor
-	result := legacy.ProcessTransaction()
-	if result != "SUCCESS" {
-		return result
-	}
-
-	// WRITE: Start Transaction
-	tx, err := s.DB.Begin()
-	if err != nil {
-		return "FAILED_START_TRANSACTION"
-	}
-
-	// Execute Write Query 1: Debit saldo user
-	newUserBalance := userBalance - amount
-	_, err = tx.Exec(
-		"UPDATE users SET balance=$1 WHERE id=$2",
-		newUserBalance, userID,
-	)
-	if err != nil {
-		tx.Rollback()
-		return "FAILED_DEBIT_USER"
-	}
-
-	// Execute Write Query 2: Kredit saldo merchant
-	newMerchantBalance := merchant.Balance + int64(amount)
-	_, err = tx.Exec(
-		"UPDATE merchants SET balance=$1 WHERE id=$2",
-		newMerchantBalance, merchant.ID,
-	)
-	if err != nil {
-		tx.Rollback()
-		return "FAILED_CREDIT_MERCHANT"
-	}
-
-	// Execute Write Query 3: Simpan transaksi
-	_, err = tx.Exec(
-		"INSERT INTO transactions(user_id, amount, status) VALUES($1,$2,$3)",
-		userID, amount, result,
-	)
-	if err != nil {
-		tx.Rollback()
-		return "FAILED_SAVE_TRANSACTION"
-	}
-
-	// Commit semua sekaligus
-	if err := tx.Commit(); err != nil {
-		tx.Rollback()
-		return "FAILED_COMMIT"
-	}
-
-	// Update Cache setelah commit berhasil
-	s.Cache.Set(
-		cache.KeyUserBalance(userID),
-		strconv.Itoa(newUserBalance),
-		10*time.Minute,
-	)
-	s.Cache.Set(
-		cache.KeyMerchantBalance(merchant.ID),
-		fmt.Sprintf("%d", newMerchantBalance),
-		10*time.Minute,
-	)
-
-	return result
-}
-
-// getUserBalanceWithCache - READ dengan cache
-func (s *TransactionService) getUserBalanceWithCache(userID int) (int, error) {
-	// Cek cache dulu
-	cached, err := s.Cache.Get(cache.KeyUserBalance(userID))
-	if err == nil {
-		balance, err := strconv.Atoi(cached)
-		if err == nil {
-			return balance, nil
+	var merchant *model.Merchant
+	if req.Type == legacy.TypeQRIS {
+		merchant, err = s.MerchantRepo.GetByCodeForUpdate(tx, req.MerchantCode)
+		if err != nil {
+			return TransactionResult{Status: legacy.StatusInvalidInput, Code: "15", Message: "merchant not found or inactive"}
 		}
 	}
 
-	// Cache miss - ambil dari DB
-	balance, err := s.UserRepo.GetBalance(userID)
-	if err != nil {
-		return 0, err
+	result := legacy.ExecuteTransaction(req, user, merchant)
+
+	audit := &model.AuditEntry{
+		EventType:    "TRANSACTION",
+		EventSubType: string(req.Type),
+		ReferenceID:  req.UserID,
+		Status:       result.Status,
+		Message:      result.Message,
+		Payload:      fmt.Sprintf("user=%d amount=%d merchant=%s", req.UserID, req.Amount, req.MerchantCode),
+	}
+	auditID, auditErr := s.AuditRepo.Record(tx, audit)
+	if auditErr != nil {
+		tx.Rollback()
+		return TransactionResult{Status: legacy.StatusSystemBusy, Code: "96", Message: "failed to log audit"}
 	}
 
-	// Simpan ke cache
-	s.Cache.Set(
-		cache.KeyUserBalance(userID),
-		strconv.Itoa(balance),
-		10*time.Minute,
-	)
+	if result.Status != legacy.StatusSuccess {
+		if commitErr := tx.Commit(); commitErr != nil {
+			tx.Rollback()
+			return TransactionResult{Status: legacy.StatusSystemBusy, Code: "91", Message: "failed to complete failed transaction path"}
+		}
+		return TransactionResult{Status: result.Status, Code: result.Code, Message: result.Message, AuditID: auditID}
+	}
 
-	return balance, nil
+	newUserBalance := user.Balance - req.Amount
+	if err := s.UserRepo.UpdateBalanceWithTx(tx, user.ID, newUserBalance); err != nil {
+		tx.Rollback()
+		return TransactionResult{Status: legacy.StatusFailed, Code: "94", Message: "failed to debit user account"}
+	}
+
+	var merchantID int
+	var newMerchantBalance int64
+	if merchant != nil {
+		newMerchantBalance = merchant.Balance + int64(req.Amount)
+		if err := s.MerchantRepo.UpdateBalanceWithTx(tx, merchant.ID, newMerchantBalance); err != nil {
+			tx.Rollback()
+			return TransactionResult{Status: legacy.StatusFailed, Code: "95", Message: "failed to credit merchant account"}
+		}
+		merchantID = merchant.ID
+	}
+
+	transaction := &model.Transaction{
+		UserID:          user.ID,
+		MerchantID:      merchantID,
+		Amount:          req.Amount,
+		Status:          result.Status,
+		TransactionType: string(req.Type),
+	}
+	transactionID, err := s.Repo.SaveWithTx(tx, transaction)
+	if err != nil {
+		tx.Rollback()
+		return TransactionResult{Status: legacy.StatusFailed, Code: "94", Message: "failed to persist transaction"}
+	}
+
+	ledgerEntries := []model.LedgerEntry{
+		{TransactionID: transactionID, AccountType: "USER", AccountID: user.ID, Direction: "DEBIT", Amount: int64(req.Amount), EntryType: string(req.Type)},
+	}
+	if merchant != nil {
+		ledgerEntries = append(ledgerEntries, model.LedgerEntry{TransactionID: transactionID, AccountType: "MERCHANT", AccountID: merchant.ID, Direction: "CREDIT", Amount: int64(req.Amount), EntryType: string(req.Type)})
+	}
+
+	if err := s.LedgerRepo.PostEntries(tx, ledgerEntries); err != nil {
+		tx.Rollback()
+		return TransactionResult{Status: legacy.StatusFailed, Code: "94", Message: "failed to record ledger entries"}
+	}
+
+	if err := tx.Commit(); err != nil {
+		tx.Rollback()
+		return TransactionResult{Status: legacy.StatusSystemBusy, Code: "91", Message: "failed to commit transaction"}
+	}
+
+	return TransactionResult{Status: result.Status, Code: result.Code, Message: result.Message, TransactionID: transactionID, AuditID: auditID}
 }
 
 func (s *TransactionService) GetUserTransactions(userID int) ([]map[string]interface{}, error) {

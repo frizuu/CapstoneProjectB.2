@@ -32,6 +32,28 @@ func (r *MerchantRepo) GetByCode(merchantCode string) (*model.Merchant, error) {
 	return merchant, nil
 }
 
+func (r *MerchantRepo) GetByCodeForUpdate(tx *sql.Tx, merchantCode string) (*model.Merchant, error) {
+	merchant := &model.Merchant{}
+	err := tx.QueryRow(
+		`SELECT id, name, balance, merchant_code, category, status, created_at
+		 FROM public.merchants
+		 WHERE merchant_code = $1 AND status = 'ACTIVE' FOR UPDATE`,
+		merchantCode,
+	).Scan(
+		&merchant.ID,
+		&merchant.Name,
+		&merchant.Balance,
+		&merchant.MerchantCode,
+		&merchant.Category,
+		&merchant.Status,
+		&merchant.CreatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return merchant, nil
+}
+
 // GetByID - mencari merchant berdasarkan ID
 func (r *MerchantRepo) GetByID(merchantID int) (*model.Merchant, error) {
 	merchant := &model.Merchant{}
@@ -65,9 +87,9 @@ func (r *MerchantRepo) GetBalance(merchantID int) (int64, error) {
 	return balance, err
 }
 
-// UpdateBalance - update saldo merchant (saat menerima pembayaran QRIS)
-func (r *MerchantRepo) UpdateBalance(merchantID int, newBalance int64) error {
-	_, err := r.DB.Exec(
+// UpdateBalanceWithTx - update saldo merchant dalam konteks transaksi
+func (r *MerchantRepo) UpdateBalanceWithTx(tx *sql.Tx, merchantID int, newBalance int64) error {
+	_, err := tx.Exec(
 		`UPDATE public.merchants SET balance = $1 WHERE id = $2`,
 		newBalance, merchantID,
 	)

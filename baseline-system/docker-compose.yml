@@ -9,15 +9,12 @@ services:
       - "8080:8080"
     depends_on:
       - db
-      - redis
     environment:
       - DB_HOST=db
       - DB_PORT=5432
       - DB_USER=postgres
       - DB_PASS=postgres
       - DB_NAME=bank
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
 
   db:
     image: postgres:15
@@ -33,16 +30,5 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
 
-  redis:
-    image: redis:7-alpine
-    container_name: redis-cache
-    restart: always
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    command: redis-server --appendonly yes
-
 volumes:
   postgres_data:
-  redis_data:

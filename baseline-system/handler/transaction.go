@@ -22,20 +22,34 @@ type QRISRequest struct {
 	Amount       int    `json:"amount"`
 }
 
-// Payment - POST /payment (existing)
+type TransactionResponse struct {
+	Status        string `json:"status"`
+	Code          string `json:"code,omitempty"`
+	Message       string `json:"message,omitempty"`
+	TransactionID int    `json:"transaction_id,omitempty"`
+	AuditID       int    `json:"audit_id,omitempty"`
+}
+
+// Payment - POST /payment
 func (h *Handler) Payment(w http.ResponseWriter, r *http.Request) {
 	var req Request
-	json.NewDecoder(r.Body).Decode(&req)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.UserID == 0 || req.Amount <= 0 {
+		http.Error(w, "user_id and amount are required", http.StatusBadRequest)
+		return
+	}
 
 	result := h.Service.Process(req.UserID, req.Amount)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
-		"status": result,
-	})
+	json.NewEncoder(w).Encode(result)
 }
 
-// PaymentQRIS - POST /qris/payment (baru)
+// PaymentQRIS - POST /qris/payment
 func (h *Handler) PaymentQRIS(w http.ResponseWriter, r *http.Request) {
 	var req QRISRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -51,9 +65,7 @@ func (h *Handler) PaymentQRIS(w http.ResponseWriter, r *http.Request) {
 	result := h.Service.ProcessQRIS(req.UserID, req.MerchantCode, req.Amount)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
-		"status": result,
-	})
+	json.NewEncoder(w).Encode(result)
 }
 
 func (h *Handler) GetUserTransactions(w http.ResponseWriter, r *http.Request) {

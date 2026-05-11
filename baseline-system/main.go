@@ -1,7 +1,6 @@
 package main
 
 import (
-	"baseline-system/cache"
 	"baseline-system/config"
 	"baseline-system/handler"
 	"baseline-system/repository"
@@ -14,25 +13,24 @@ func main() {
 	// Koneksi Database
 	db := config.ConnectDB()
 
-	// Koneksi Redis Cache
-	redisCache := cache.NewRedisCache()
-
 	// Repository
 	repo := &repository.TransactionRepo{DB: db}
 	userRepo := &repository.UserRepo{DB: db}
 	merchantRepo := &repository.MerchantRepo{DB: db}
+	auditRepo := &repository.AuditRepo{DB: db}
+	ledgerRepo := &repository.LedgerRepo{DB: db}
 
 	// Handler
 	userHandler := &handler.UserHandler{UserRepo: userRepo}
 	merchantHandler := &handler.MerchantHandler{MerchantRepo: merchantRepo}
 
-	// Service (sekarang menerima DB dan Cache)
 	svc := &service.TransactionService{
 		DB:           db,
 		Repo:         repo,
 		UserRepo:     userRepo,
 		MerchantRepo: merchantRepo,
-		Cache:        redisCache,
+		AuditRepo:    auditRepo,
+		LedgerRepo:   ledgerRepo,
 	}
 	h := &handler.Handler{Service: svc}
 
