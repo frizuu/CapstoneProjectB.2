@@ -12,8 +12,11 @@ type Handler struct {
 }
 
 type Request struct {
-	UserID int `json:"user_id"`
-	Amount int `json:"amount"`
+	UserID          int    `json:"user_id"`
+	RecipientUserID int    `json:"recipient_user_id,omitempty"`
+	MerchantID      int    `json:"merchant_id,omitempty"`
+	MerchantCode    string `json:"merchant_code,omitempty"`
+	Amount          int    `json:"amount"`
 }
 
 type QRISRequest struct {
@@ -43,7 +46,34 @@ func (h *Handler) Payment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result := h.Service.Process(req.UserID, req.Amount)
+	targetCount := 0
+	if req.RecipientUserID != 0 {
+		targetCount++
+	}
+	if req.MerchantID != 0 {
+		targetCount++
+	}
+	if req.MerchantCode != "" {
+		targetCount++
+	}
+	if targetCount > 1 {
+		http.Error(w, "use only one target: recipient_user_id, merchant_id, or merchant_code", http.StatusBadRequest)
+		return
+	}
+	if req.RecipientUserID == req.UserID {
+		http.Error(w, "recipient_user_id cannot be the same as user_id", http.StatusBadRequest)
+		return
+	}
+
+	var result service.TransactionResult
+	switch {
+	case req.RecipientUserID != 0:
+		result = h.Service.ProcessTransfer(req.UserID, req.RecipientUserID, req.Amount)
+	case req.MerchantID != 0 || req.MerchantCode != "":
+		result = h.Service.ProcessToMerchant(req.UserID, req.MerchantID, req.MerchantCode, req.Amount)
+	default:
+		result = h.Service.Process(req.UserID, req.Amount)
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)

@@ -19,6 +19,9 @@ func main() {
 	merchantRepo := &repository.MerchantRepo{DB: db}
 	auditRepo := &repository.AuditRepo{DB: db}
 	ledgerRepo := &repository.LedgerRepo{DB: db}
+	if err := repo.EnsureSchema(); err != nil {
+		panic(err)
+	}
 
 	// Handler
 	userHandler := &handler.UserHandler{UserRepo: userRepo}

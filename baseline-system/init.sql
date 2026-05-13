@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS public.transactions (
     id               SERIAL PRIMARY KEY,
     user_id          integer REFERENCES public.users(id),
     merchant_id      integer REFERENCES public.merchants(id),
+    recipient_user_id integer REFERENCES public.users(id),
     amount           integer,
     status           character varying(50),
     transaction_type character varying(50),
@@ -56,6 +57,7 @@ CREATE TABLE IF NOT EXISTS public.audit_logs (
 CREATE INDEX IF NOT EXISTS idx_merchants_merchant_code ON public.merchants(merchant_code);
 CREATE INDEX IF NOT EXISTS idx_merchants_status        ON public.merchants(status);
 CREATE INDEX IF NOT EXISTS idx_transactions_user_id    ON public.transactions(user_id);
+CREATE INDEX IF NOT EXISTS idx_transactions_recipient_user_id ON public.transactions(recipient_user_id);
 CREATE INDEX IF NOT EXISTS idx_ledger_transaction_id   ON public.ledger_entries(transaction_id);
 CREATE INDEX IF NOT EXISTS idx_audit_reference_id      ON public.audit_logs(reference_id);
 

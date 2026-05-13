@@ -39,3 +39,11 @@ func (r *UserRepo) UpdateBalanceWithTx(tx *sql.Tx, userID int, newBalance int) e
 	)
 	return err
 }
+
+func (r *UserRepo) CreditBalanceWithTx(tx *sql.Tx, userID int, amount int) error {
+	_, err := tx.Exec(
+		"UPDATE users SET balance = balance + $1 WHERE id=$2",
+		amount, userID,
+	)
+	return err
+}

@@ -54,6 +54,28 @@ func (r *MerchantRepo) GetByCodeForUpdate(tx *sql.Tx, merchantCode string) (*mod
 	return merchant, nil
 }
 
+func (r *MerchantRepo) GetByIDForUpdate(tx *sql.Tx, merchantID int) (*model.Merchant, error) {
+	merchant := &model.Merchant{}
+	err := tx.QueryRow(
+		`SELECT id, name, balance, merchant_code, category, status, created_at
+		 FROM public.merchants
+		 WHERE id = $1 AND status = 'ACTIVE' FOR UPDATE`,
+		merchantID,
+	).Scan(
+		&merchant.ID,
+		&merchant.Name,
+		&merchant.Balance,
+		&merchant.MerchantCode,
+		&merchant.Category,
+		&merchant.Status,
+		&merchant.CreatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return merchant, nil
+}
+
 // GetByID - mencari merchant berdasarkan ID
 func (r *MerchantRepo) GetByID(merchantID int) (*model.Merchant, error) {
 	merchant := &model.Merchant{}
