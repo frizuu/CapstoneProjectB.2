@@ -14,6 +14,11 @@ const (
 	TypePayment  = "PAYMENT"
 	TypeQRIS     = "QRIS_PAYMENT"
 	TypeTransfer = "USER_TRANSFER"
+	TypeBalance  = "BALANCE_INQUIRY"
+	TypeStatus   = "TRANSACTION_STATUS_INQUIRY"
+	TypeMerchant = "MERCHANT_INQUIRY"
+	TypeHistory  = "TRANSACTION_HISTORY_INQUIRY"
+	TypeReversal = "REVERSAL"
 
 	StatusSuccess      = "SUCCESS"
 	StatusFailed       = "FAILED"
@@ -39,10 +44,18 @@ type TransactionResult struct {
 	Status       string
 	Code         string
 	Message      string
-	HostRef      string
 	NeedReversal bool
 	LatencyMs    int64
 	Profile      string
+}
+
+type BalanceInquiryResult struct {
+	Status    string
+	Code      string
+	Message   string
+	Balance   int
+	LatencyMs int64
+	Profile   string
 }
 
 type networkProfile struct {
@@ -102,11 +115,6 @@ func resolveNetworkProfile() networkProfile {
 	}
 }
 
-func generateHostRef(req *TransactionRequest) string {
-	now := time.Now()
-	return fmt.Sprintf("AS400-%s-%06d-%04d", now.Format("20060102150405"), req.UserID, rand.Intn(10000))
-}
-
 func prepareRequest(req *TransactionRequest) {
 	if req.ReferenceNo == "" {
 		req.ReferenceNo = fmt.Sprintf("REF-%d-%d-%04d", req.UserID, time.Now().UnixNano(), rand.Intn(10000))
@@ -117,6 +125,17 @@ func prepareRequest(req *TransactionRequest) {
 	if req.RequestedTime.IsZero() {
 		req.RequestedTime = time.Now()
 	}
+}
+
+func PrepareInquiryRequest(req *TransactionRequest) {
+	prepareRequest(req)
+}
+
+func ExecuteInquiryHost(operation string, stage string) (string, string) {
+	profile := resolveNetworkProfile()
+	simulateAS400Delay(profile, stage)
+	status, _ := processLegacyCore(operation, profile)
+	return profile.Name, status
 }
 
 func simulateAS400Delay(profile networkProfile, stage string) time.Duration {
@@ -214,7 +233,26 @@ func validateRequest(req *TransactionRequest, user *model.User, merchant *model.
 	return nil
 }
 
-// evaluateBusinessRules enforces banking rules on transaction (AS/400 rule engine)
+func validateBalanceInquiry(req *TransactionRequest, user *model.User) *BalanceInquiryResult {
+	if req == nil || req.UserID == 0 {
+		return &BalanceInquiryResult{Status: StatusInvalidInput, Code: "14", Message: "invalid balance inquiry request"}
+	}
+
+	if user == nil {
+		return &BalanceInquiryResult{Status: StatusInvalidInput, Code: "14", Message: "user not found"}
+	}
+
+	if user.ID%97 == 0 {
+		return &BalanceInquiryResult{Status: StatusFailed, Code: "76", Message: "account marked dormant by legacy host"}
+	}
+
+	if user.ID%89 == 0 {
+		return &BalanceInquiryResult{Status: StatusFailed, Code: "78", Message: "account blocked by legacy host"}
+	}
+
+	return nil
+}
+
 func evaluateBusinessRules(req *TransactionRequest, user *model.User, merchant *model.Merchant) *TransactionResult {
 	if req.Amount > 10000000 {
 		return &TransactionResult{Status: StatusFailed, Code: "61", Message: "amount exceeds single-transaction limit"}
@@ -240,11 +278,9 @@ func isLegacyCutoffWindow(t time.Time) bool {
 		t = time.Now()
 	}
 
-	// Short host cutover window to mimic EOD/batch behavior without blocking normal demos.
 	return t.Hour() == 23 && t.Minute() >= 55
 }
 
-// fraudCheck performs batch fraud scoring (simulated AS/400 fraud engine)
 func fraudCheck(req *TransactionRequest, user *model.User, merchant *model.Merchant) *TransactionResult {
 	if req.Amount > 5000000 {
 		percent := rand.Intn(100)
@@ -291,7 +327,6 @@ func ExecuteTransaction(req *TransactionRequest, user *model.User, merchant *mod
 	}
 
 	// STAGE 4: Monolithic Core Processing (AS/400 Batch)
-	hostRef := generateHostRef(req)
 	status, _ := processLegacyCore(req.Type, profile)
 	if status != StatusSuccess {
 		needReversal := status == StatusTimeout && rand.Intn(100) < profile.AmbiguousTimeoutRate
@@ -304,7 +339,6 @@ func ExecuteTransaction(req *TransactionRequest, user *model.User, merchant *mod
 			Status:       status,
 			Code:         "96",
 			Message:      message,
-			HostRef:      hostRef,
 			NeedReversal: needReversal,
 			LatencyMs:    time.Since(start).Milliseconds(),
 			Profile:      profile.Name,
@@ -315,7 +349,39 @@ func ExecuteTransaction(req *TransactionRequest, user *model.User, merchant *mod
 		Status:    StatusSuccess,
 		Code:      "00",
 		Message:   "Transaction successful",
-		HostRef:   hostRef,
+		LatencyMs: time.Since(start).Milliseconds(),
+		Profile:   profile.Name,
+	}
+}
+
+func ExecuteBalanceInquiry(req *TransactionRequest, user *model.User) BalanceInquiryResult {
+	start := time.Now()
+	profile := resolveNetworkProfile()
+	prepareRequest(req)
+
+	simulateAS400Delay(profile, "VALIDATION")
+	if validation := validateBalanceInquiry(req, user); validation != nil {
+		validation.Profile = profile.Name
+		validation.LatencyMs = time.Since(start).Milliseconds()
+		return *validation
+	}
+
+	status, _ := processLegacyCore(TypeBalance, profile)
+	if status != StatusSuccess {
+		return BalanceInquiryResult{
+			Status:    status,
+			Code:      "96",
+			Message:   "legacy core returned " + status,
+			LatencyMs: time.Since(start).Milliseconds(),
+			Profile:   profile.Name,
+		}
+	}
+
+	return BalanceInquiryResult{
+		Status:    StatusSuccess,
+		Code:      "00",
+		Message:   "Balance inquiry successful",
+		Balance:   user.Balance,
 		LatencyMs: time.Since(start).Milliseconds(),
 		Profile:   profile.Name,
 	}

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"baseline-system/repository"
+	"baseline-system/service"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -9,6 +10,7 @@ import (
 
 type MerchantHandler struct {
 	MerchantRepo *repository.MerchantRepo
+	Service      *service.TransactionService
 }
 
 // InquiryQRIS - GET /qris/inquiry?merchant_code=NMID001234567890
@@ -20,20 +22,10 @@ func (h *MerchantHandler) InquiryQRIS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	merchant, err := h.MerchantRepo.GetByCode(merchantCode)
-	if err != nil {
-		http.Error(w, "Merchant not found", http.StatusNotFound)
-		return
-	}
+	result := h.Service.MerchantInquiry(merchantCode)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":        "SUCCESS",
-		"merchant_id":   merchant.ID,
-		"merchant_name": merchant.Name,
-		"merchant_code": merchant.MerchantCode,
-		"category":      merchant.Category,
-	})
+	json.NewEncoder(w).Encode(result)
 }
 
 // GetMerchantBalance - GET /merchant/balance?merchant_id=1

@@ -17,12 +17,19 @@ type Request struct {
 	MerchantID      int    `json:"merchant_id,omitempty"`
 	MerchantCode    string `json:"merchant_code,omitempty"`
 	Amount          int    `json:"amount"`
+	ReferenceNo     string `json:"reference_no,omitempty"`
 }
 
 type QRISRequest struct {
 	UserID       int    `json:"user_id"`
 	MerchantCode string `json:"merchant_code"`
 	Amount       int    `json:"amount"`
+	ReferenceNo  string `json:"reference_no,omitempty"`
+}
+
+type ReversalRequest struct {
+	TransactionID int    `json:"transaction_id"`
+	ReferenceNo   string `json:"reference_no,omitempty"`
 }
 
 type TransactionResponse struct {
@@ -68,11 +75,11 @@ func (h *Handler) Payment(w http.ResponseWriter, r *http.Request) {
 	var result service.TransactionResult
 	switch {
 	case req.RecipientUserID != 0:
-		result = h.Service.ProcessTransfer(req.UserID, req.RecipientUserID, req.Amount)
+		result = h.Service.ProcessTransfer(req.UserID, req.RecipientUserID, req.Amount, req.ReferenceNo)
 	case req.MerchantID != 0 || req.MerchantCode != "":
-		result = h.Service.ProcessToMerchant(req.UserID, req.MerchantID, req.MerchantCode, req.Amount)
+		result = h.Service.ProcessToMerchant(req.UserID, req.MerchantID, req.MerchantCode, req.Amount, req.ReferenceNo)
 	default:
-		result = h.Service.Process(req.UserID, req.Amount)
+		result = h.Service.Process(req.UserID, req.Amount, req.ReferenceNo)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -92,7 +99,25 @@ func (h *Handler) PaymentQRIS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result := h.Service.ProcessQRIS(req.UserID, req.MerchantCode, req.Amount)
+	result := h.Service.ProcessQRIS(req.UserID, req.MerchantCode, req.Amount, req.ReferenceNo)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+func (h *Handler) ReverseTransaction(w http.ResponseWriter, r *http.Request) {
+	var req ReversalRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.TransactionID <= 0 {
+		http.Error(w, "transaction_id is required", http.StatusBadRequest)
+		return
+	}
+
+	result := h.Service.ReverseTransaction(req.TransactionID, req.ReferenceNo)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
@@ -111,12 +136,32 @@ func (h *Handler) GetUserTransactions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data, err := h.Service.GetUserTransactions(userID)
-	if err != nil {
-		http.Error(w, "failed to fetch transactions", http.StatusInternalServerError)
+	result := h.Service.GetUserTransactionHistory(userID)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+func (h *Handler) GetTransactionStatus(w http.ResponseWriter, r *http.Request) {
+	transactionIDStr := r.URL.Query().Get("transaction_id")
+	if transactionIDStr == "" {
+		http.Error(w, "transaction_id is required", http.StatusBadRequest)
 		return
 	}
 
+	transactionID, err := strconv.Atoi(transactionIDStr)
+	if err != nil {
+		http.Error(w, "invalid transaction_id", http.StatusBadRequest)
+		return
+	}
+
+	if transactionID <= 0 {
+		http.Error(w, "transaction_id must be greater than 0", http.StatusBadRequest)
+		return
+	}
+
+	result := h.Service.GetTransactionStatus(transactionID)
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(data)
+	json.NewEncoder(w).Encode(result)
 }

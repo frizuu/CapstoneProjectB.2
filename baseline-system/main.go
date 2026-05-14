@@ -23,10 +23,6 @@ func main() {
 		panic(err)
 	}
 
-	// Handler
-	userHandler := &handler.UserHandler{UserRepo: userRepo}
-	merchantHandler := &handler.MerchantHandler{MerchantRepo: merchantRepo}
-
 	svc := &service.TransactionService{
 		DB:           db,
 		Repo:         repo,
@@ -35,10 +31,15 @@ func main() {
 		AuditRepo:    auditRepo,
 		LedgerRepo:   ledgerRepo,
 	}
+
+	// Handler
+	userHandler := &handler.UserHandler{Service: svc}
+	merchantHandler := &handler.MerchantHandler{MerchantRepo: merchantRepo, Service: svc}
 	h := &handler.Handler{Service: svc}
 
 	// Routes - existing
 	http.HandleFunc("/payment", h.Payment)
+	http.HandleFunc("/transaction/reversal", h.ReverseTransaction)
 	http.HandleFunc("/balance", userHandler.GetBalance)
 
 	// Routes - QRIS
@@ -47,6 +48,7 @@ func main() {
 	http.HandleFunc("/merchant/balance", merchantHandler.GetMerchantBalance)
 	http.HandleFunc("/merchants", merchantHandler.GetAllMerchants)
 	http.HandleFunc("/transactions", h.GetUserTransactions)
+	http.HandleFunc("/transaction/status", h.GetTransactionStatus)
 	println("Server running on :8080")
 	http.ListenAndServe(":8080", nil)
 }
