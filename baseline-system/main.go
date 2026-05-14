@@ -34,7 +34,7 @@ func main() {
 
 	// Handler
 	userHandler := &handler.UserHandler{Service: svc}
-	merchantHandler := &handler.MerchantHandler{MerchantRepo: merchantRepo, Service: svc}
+	merchantHandler := &handler.MerchantHandler{MerchantRepo: merchantRepo}
 	h := &handler.Handler{Service: svc}
 
 	// Routes - existing
