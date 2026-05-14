@@ -31,3 +31,29 @@ func TestExecuteTransactionRejectsInsufficientFundsBeforePosting(t *testing.T) {
 		t.Fatalf("expected insufficient funds message, got %q", result.Message)
 	}
 }
+
+func TestExecuteMerchantBalanceInquiryRejectsInactiveMerchant(t *testing.T) {
+	req := &TransactionRequest{
+		Type:         TypeMerchantBalance,
+		MerchantCode: "MRC-INACTIVE",
+	}
+	merchant := &model.Merchant{
+		ID:           10,
+		Name:         "Inactive Merchant",
+		Balance:      250000,
+		MerchantCode: "MRC-INACTIVE",
+		Status:       "INACTIVE",
+	}
+
+	result := ExecuteMerchantBalanceInquiry(req, merchant)
+
+	if result.Status != StatusFailed {
+		t.Fatalf("expected failed status, got %s", result.Status)
+	}
+	if result.Code != "16" {
+		t.Fatalf("expected inactive merchant code 16, got %s", result.Code)
+	}
+	if result.Balance != 0 {
+		t.Fatalf("expected balance to be omitted on failed inquiry, got %d", result.Balance)
+	}
+}

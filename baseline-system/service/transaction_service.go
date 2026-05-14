@@ -42,6 +42,18 @@ type BalanceInquiryResult struct {
 	LegacyLatency int64  `json:"legacy_latency_ms,omitempty"`
 }
 
+type MerchantBalanceInquiryResult struct {
+	Status        string `json:"status"`
+	Code          string `json:"code,omitempty"`
+	Message       string `json:"message,omitempty"`
+	MerchantID    int    `json:"merchant_id"`
+	MerchantCode  string `json:"merchant_code,omitempty"`
+	Balance       int64  `json:"balance"`
+	AuditID       int    `json:"audit_id,omitempty"`
+	LegacyProfile string `json:"legacy_profile,omitempty"`
+	LegacyLatency int64  `json:"legacy_latency_ms,omitempty"`
+}
+
 type MerchantInquiryResult struct {
 	Status        string `json:"status"`
 	Code          string `json:"code,omitempty"`
@@ -154,6 +166,45 @@ func (s *TransactionService) BalanceInquiry(userID int) BalanceInquiryResult {
 		Code:          result.Code,
 		Message:       result.Message,
 		UserID:        userID,
+		AuditID:       auditID,
+		LegacyProfile: result.Profile,
+		LegacyLatency: result.LatencyMs,
+	}
+	if result.Status == legacy.StatusSuccess {
+		response.Balance = result.Balance
+	}
+
+	return response
+}
+
+func (s *TransactionService) MerchantBalanceInquiry(merchantID int) MerchantBalanceInquiryResult {
+	merchant, err := s.MerchantRepo.GetByID(merchantID)
+	if err != nil {
+		return MerchantBalanceInquiryResult{Status: legacy.StatusInvalidInput, Code: "15", Message: "merchant not found"}
+	}
+
+	req := &legacy.TransactionRequest{
+		Type:         legacy.TypeMerchantBalance,
+		MerchantCode: merchant.MerchantCode,
+	}
+	result := legacy.ExecuteMerchantBalanceInquiry(req, merchant)
+
+	audit := &model.AuditEntry{
+		EventType:    "INQUIRY",
+		EventSubType: legacy.TypeMerchantBalance,
+		ReferenceID:  merchant.ID,
+		Status:       result.Status,
+		Message:      result.Message,
+		Payload:      fmt.Sprintf("merchant=%d merchant_code=%s ref=%s profile=%s latency_ms=%d", merchant.ID, merchant.MerchantCode, req.ReferenceNo, result.Profile, result.LatencyMs),
+	}
+	auditID, _ := s.AuditRepo.RecordNoTx(audit)
+
+	response := MerchantBalanceInquiryResult{
+		Status:        result.Status,
+		Code:          result.Code,
+		Message:       result.Message,
+		MerchantID:    merchant.ID,
+		MerchantCode:  merchant.MerchantCode,
 		AuditID:       auditID,
 		LegacyProfile: result.Profile,
 		LegacyLatency: result.LatencyMs,

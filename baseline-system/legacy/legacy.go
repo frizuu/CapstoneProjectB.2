@@ -11,14 +11,15 @@ import (
 )
 
 const (
-	TypePayment  = "PAYMENT"
-	TypeQRIS     = "QRIS_PAYMENT"
-	TypeTransfer = "USER_TRANSFER"
-	TypeBalance  = "BALANCE_INQUIRY"
-	TypeStatus   = "TRANSACTION_STATUS_INQUIRY"
-	TypeMerchant = "MERCHANT_INQUIRY"
-	TypeHistory  = "TRANSACTION_HISTORY_INQUIRY"
-	TypeReversal = "REVERSAL"
+	TypePayment         = "PAYMENT"
+	TypeQRIS            = "QRIS_PAYMENT"
+	TypeTransfer        = "USER_TRANSFER"
+	TypeBalance         = "BALANCE_INQUIRY"
+	TypeStatus          = "TRANSACTION_STATUS_INQUIRY"
+	TypeMerchant        = "MERCHANT_INQUIRY"
+	TypeMerchantBalance = "MERCHANT_BALANCE_INQUIRY"
+	TypeHistory         = "TRANSACTION_HISTORY_INQUIRY"
+	TypeReversal        = "REVERSAL"
 
 	StatusSuccess      = "SUCCESS"
 	StatusFailed       = "FAILED"
@@ -56,6 +57,17 @@ type BalanceInquiryResult struct {
 	Balance   int
 	LatencyMs int64
 	Profile   string
+}
+
+type MerchantBalanceInquiryResult struct {
+	Status       string
+	Code         string
+	Message      string
+	MerchantID   int
+	MerchantCode string
+	Balance      int64
+	LatencyMs    int64
+	Profile      string
 }
 
 type networkProfile struct {
@@ -253,6 +265,22 @@ func validateBalanceInquiry(req *TransactionRequest, user *model.User) *BalanceI
 	return nil
 }
 
+func validateMerchantBalanceInquiry(req *TransactionRequest, merchant *model.Merchant) *MerchantBalanceInquiryResult {
+	if req == nil || req.MerchantCode == "" {
+		return &MerchantBalanceInquiryResult{Status: StatusInvalidInput, Code: "14", Message: "invalid merchant balance inquiry request"}
+	}
+
+	if merchant == nil {
+		return &MerchantBalanceInquiryResult{Status: StatusInvalidInput, Code: "15", Message: "merchant not found"}
+	}
+
+	if merchant.Status != "ACTIVE" {
+		return &MerchantBalanceInquiryResult{Status: StatusFailed, Code: "16", Message: "merchant is not active"}
+	}
+
+	return nil
+}
+
 func evaluateBusinessRules(req *TransactionRequest, user *model.User, merchant *model.Merchant) *TransactionResult {
 	if req.Amount > 10000000 {
 		return &TransactionResult{Status: StatusFailed, Code: "61", Message: "amount exceeds single-transaction limit"}
@@ -384,5 +412,42 @@ func ExecuteBalanceInquiry(req *TransactionRequest, user *model.User) BalanceInq
 		Balance:   user.Balance,
 		LatencyMs: time.Since(start).Milliseconds(),
 		Profile:   profile.Name,
+	}
+}
+
+func ExecuteMerchantBalanceInquiry(req *TransactionRequest, merchant *model.Merchant) MerchantBalanceInquiryResult {
+	start := time.Now()
+	profile := resolveNetworkProfile()
+	prepareRequest(req)
+
+	simulateAS400Delay(profile, "VALIDATION")
+	if validation := validateMerchantBalanceInquiry(req, merchant); validation != nil {
+		validation.Profile = profile.Name
+		validation.LatencyMs = time.Since(start).Milliseconds()
+		return *validation
+	}
+
+	status, _ := processLegacyCore(TypeMerchantBalance, profile)
+	if status != StatusSuccess {
+		return MerchantBalanceInquiryResult{
+			Status:       status,
+			Code:         "96",
+			Message:      "legacy core returned " + status,
+			MerchantID:   merchant.ID,
+			MerchantCode: merchant.MerchantCode,
+			LatencyMs:    time.Since(start).Milliseconds(),
+			Profile:      profile.Name,
+		}
+	}
+
+	return MerchantBalanceInquiryResult{
+		Status:       StatusSuccess,
+		Code:         "00",
+		Message:      "Merchant balance inquiry successful",
+		MerchantID:   merchant.ID,
+		MerchantCode: merchant.MerchantCode,
+		Balance:      merchant.Balance,
+		LatencyMs:    time.Since(start).Milliseconds(),
+		Profile:      profile.Name,
 	}
 }
