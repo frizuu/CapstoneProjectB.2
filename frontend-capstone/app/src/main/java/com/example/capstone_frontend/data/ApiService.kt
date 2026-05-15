@@ -25,7 +25,6 @@ interface ApiService {
         @Query("merchant_code") merchantCode: String
     ): QrisInquiryResponse
 
-    // Dibuat tetap menerima Idempotency-Key agar AppNavigation lama tidak error.
     @Headers("Content-Type: application/json")
     @POST("qris/payment")
     suspend fun qrisPayment(
@@ -44,5 +43,5 @@ interface ApiService {
     @GET("transactions")
     suspend fun getTransactions(
         @Query("user_id") userId: Int
-    ): List<BackendTransactionResponse>
+    ): TransactionHistoryResponse
 }

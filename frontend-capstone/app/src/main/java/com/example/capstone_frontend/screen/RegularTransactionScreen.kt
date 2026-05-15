@@ -1,6 +1,7 @@
 package com.example.capstone_frontend.screen
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -35,13 +36,18 @@ import androidx.compose.ui.unit.dp
 import com.example.capstone_frontend.component.AppColor
 import com.example.capstone_frontend.component.InfoRow
 import com.example.capstone_frontend.component.formatRupiah
+import com.example.capstone_frontend.data.DummyRepository
 import com.example.capstone_frontend.data.RetrofitClient
 
 @Composable
 fun RegularTransactionScreen(
     onBack: () -> Unit,
-    onSubmitTransaction: (Int, String) -> Unit
+    onSubmitTransfer: (recipientUserId: Int, amount: Int, description: String) -> Unit
 ) {
+    var recipientText by remember {
+        mutableStateOf("")
+    }
+
     var amountText by remember {
         mutableStateOf("")
     }
@@ -58,12 +64,22 @@ fun RegularTransactionScreen(
         mutableStateOf(true)
     }
 
+    val currentUserId = DummyRepository.getCurrentUserId()
+    val currentUserName = DummyRepository.getCurrentUserName()
+
     val amount = amountText.toIntOrNull() ?: 0
 
-    LaunchedEffect(Unit) {
+    val recipientUser = remember(recipientText, currentUserId) {
+        findRecipientUser(
+            query = recipientText,
+            currentUserId = currentUserId
+        )
+    }
+
+    LaunchedEffect(currentUserId) {
         try {
             isLoadingBalance = true
-            val response = RetrofitClient.api.getBalance(1)
+            val response = RetrofitClient.api.getBalance(currentUserId)
             balance = response.balance
         } catch (_: Exception) {
             balance = 0
@@ -97,14 +113,14 @@ fun RegularTransactionScreen(
 
                 Column {
                     Text(
-                        text = "Transaksi Biasa",
+                        text = "Transfer Saldo",
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold,
                         color = AppColor.TextDark
                     )
 
                     Text(
-                        text = "Masukkan nominal transaksi sesuai baseline system.",
+                        text = "Kirim saldo ke sesama user baseline.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = AppColor.TextGray
                     )
@@ -123,7 +139,7 @@ fun RegularTransactionScreen(
                     modifier = Modifier.padding(20.dp)
                 ) {
                     Text(
-                        text = "Nominal Transaksi",
+                        text = "Data Transfer",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = AppColor.TextDark
@@ -132,10 +148,67 @@ fun RegularTransactionScreen(
                     Spacer(modifier = Modifier.height(8.dp))
 
                     Text(
-                        text = "Data yang dikirim ke backend hanya user_id dan amount, sesuai endpoint /payment pada baseline system.",
+                        text = "Masukkan nama, username tanpa spasi, atau User ID penerima.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = AppColor.TextGray
                     )
+
+                    Spacer(modifier = Modifier.height(18.dp))
+
+                    OutlinedTextField(
+                        value = recipientText,
+                        onValueChange = {
+                            recipientText = it
+                            errorMessage = ""
+                        },
+                        label = {
+                            Text("Nama / User ID Penerima")
+                        },
+                        placeholder = {
+                            Text("Contoh: Lestari Rahayu")
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+
+                    if (recipientText.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        if (recipientUser != null) {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(18.dp),
+                                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF5F8)),
+                                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(14.dp)
+                                ) {
+                                    Text(
+                                        text = "Penerima ditemukan",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = AppColor.Primary
+                                    )
+
+                                    Spacer(modifier = Modifier.height(4.dp))
+
+                                    Text(
+                                        text = "${recipientUser.name} • User ID ${recipientUser.id}",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = AppColor.TextDark
+                                    )
+                                }
+                            }
+                        } else {
+                            Text(
+                                text = "Penerima tidak ditemukan.",
+                                color = Color(0xFFC62828),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
 
                     Spacer(modifier = Modifier.height(18.dp))
 
@@ -148,7 +221,10 @@ fun RegularTransactionScreen(
                             errorMessage = ""
                         },
                         label = {
-                            Text("Nominal")
+                            Text("Nominal Transfer")
+                        },
+                        placeholder = {
+                            Text("Contoh: 10000")
                         },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
@@ -179,7 +255,7 @@ fun RegularTransactionScreen(
                             modifier = Modifier.padding(16.dp)
                         ) {
                             Text(
-                                text = "Ringkasan",
+                                text = "Ringkasan Transfer",
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.Bold,
                                 color = AppColor.TextDark
@@ -187,8 +263,13 @@ fun RegularTransactionScreen(
 
                             Spacer(modifier = Modifier.height(10.dp))
 
-                            InfoRow("Jenis Transaksi", "Transaksi Biasa")
-                            InfoRow("User ID", "1")
+                            InfoRow("Dari", "$currentUserName • User ID $currentUserId")
+                            InfoRow(
+                                "Ke",
+                                recipientUser?.let {
+                                    "${it.name} • User ID ${it.id}"
+                                } ?: "-"
+                            )
                             InfoRow("Nominal", if (amount > 0) formatRupiah(amount) else "-")
                             InfoRow(
                                 "Saldo Saat Ini",
@@ -206,8 +287,20 @@ fun RegularTransactionScreen(
                     Button(
                         onClick = {
                             when {
+                                recipientText.isBlank() -> {
+                                    errorMessage = "Nama atau User ID penerima wajib diisi."
+                                }
+
+                                recipientUser == null -> {
+                                    errorMessage = "Penerima tidak ditemukan di data baseline."
+                                }
+
+                                recipientUser.id == currentUserId -> {
+                                    errorMessage = "Penerima tidak boleh sama dengan akun pengirim."
+                                }
+
                                 amount <= 0 -> {
-                                    errorMessage = "Nominal transaksi wajib diisi."
+                                    errorMessage = "Nominal transfer wajib diisi."
                                 }
 
                                 amount < 1000 -> {
@@ -219,7 +312,11 @@ fun RegularTransactionScreen(
                                 }
 
                                 else -> {
-                                    onSubmitTransaction(amount, "Transaksi Biasa")
+                                    onSubmitTransfer(
+                                        recipientUser.id,
+                                        amount,
+                                        "Transfer ke ${recipientUser.name}"
+                                    )
                                 }
                             }
                         },
@@ -233,7 +330,7 @@ fun RegularTransactionScreen(
                         )
                     ) {
                         Text(
-                            text = "Proses Transaksi",
+                            text = "Lanjutkan Transfer",
                             fontWeight = FontWeight.Bold
                         )
                     }
@@ -253,5 +350,25 @@ fun RegularTransactionScreen(
                 }
             }
         }
+    }
+}
+
+private fun findRecipientUser(
+    query: String,
+    currentUserId: Int
+): DummyRepository.BaselineUser? {
+    val cleanQuery = query.trim().lowercase()
+
+    if (cleanQuery.isBlank()) {
+        return null
+    }
+
+    return DummyRepository.getBaselineUsers().find { user ->
+        user.id != currentUserId &&
+                (
+                        user.id.toString() == cleanQuery ||
+                                user.name.lowercase() == cleanQuery ||
+                                user.name.lowercase().replace(" ", "") == cleanQuery.replace(" ", "")
+                        )
     }
 }

@@ -12,7 +12,14 @@ data class TransactionData(
     val latencyMs: Int = 0,
     val cacheState: String = "Database Baseline",
     val networkProfile: String = "Normal",
-    val idempotencyKey: String = "-"
+    val idempotencyKey: String = "-",
+
+    // Transfer antar-user
+    val direction: String = "OUT",
+    val senderName: String? = null,
+    val recipientUserId: Int? = null,
+    val recipientUserName: String? = null,
+    val referenceNo: String? = null
 )
 
 data class MetricData(

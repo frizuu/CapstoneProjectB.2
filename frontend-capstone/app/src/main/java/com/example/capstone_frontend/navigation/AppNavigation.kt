@@ -17,14 +17,14 @@ import com.example.capstone_frontend.screen.AdminDashboardScreen
 import com.example.capstone_frontend.screen.AdminLoginScreen
 import com.example.capstone_frontend.screen.HelpScreen
 import com.example.capstone_frontend.screen.LandingScreen
-import com.example.capstone_frontend.screen.PaymentResultScreen
+import com.example.capstone_frontend.screen.PaymentResultV2Screen
 import com.example.capstone_frontend.screen.QrScannerScreen
 import com.example.capstone_frontend.screen.QrisPaymentScreen
 import com.example.capstone_frontend.screen.RegularTransactionScreen
 import com.example.capstone_frontend.screen.SplashScreen
-import com.example.capstone_frontend.screen.TransactionDetailScreen
-import com.example.capstone_frontend.screen.TransactionHistoryScreen
 import com.example.capstone_frontend.screen.TransactionStatusScreen
+import com.example.capstone_frontend.screen.TransferDetailScreen
+import com.example.capstone_frontend.screen.TransferHistoryScreen
 import com.example.capstone_frontend.screen.UserHomeScreen
 import com.example.capstone_frontend.screen.UserLoginScreen
 import kotlinx.coroutines.launch
@@ -174,14 +174,16 @@ fun AppNavigation() {
                 onPaymentSubmit = { amount, _ ->
                     scope.launch {
                         try {
+                            val currentUserId = DummyRepository.getCurrentUserId()
                             val merchantCode = DummyRepository.getCurrentMerchantCode()
 
                             val paymentResponse = RetrofitClient.api.qrisPayment(
                                 idempotencyKey = DummyRepository.buildIdempotencyKey(),
                                 request = QrisPaymentRequest(
-                                    userId = 1,
+                                    userId = currentUserId,
                                     merchantCode = merchantCode,
-                                    amount = amount
+                                    amount = amount,
+                                    referenceNo = DummyRepository.buildIdempotencyKey()
                                 )
                             )
 
@@ -193,22 +195,38 @@ fun AppNavigation() {
                                     } catch (_: Exception) {
                                     }
 
-                                    val latestTransactions = RetrofitClient.api.getTransactions(1)
-                                    val convertedTransactions =
-                                        DummyRepository.convertBackendTransactions(latestTransactions)
+                                    var transactionIdForResult =
+                                        paymentResponse.transactionId?.let {
+                                            "TRX-${it.toString().padStart(3, '0')}"
+                                        } ?: "TRX-TERBARU"
 
-                                    DummyRepository.setBackendTransactions(convertedTransactions)
+                                    try {
+                                        val latestTransactions =
+                                            RetrofitClient.api.getTransactions(currentUserId)
 
-                                    val latestTransaction = DummyRepository.getTransactions()
-                                        .firstOrNull {
-                                            it.amount == amount && it.status == "SUCCESS"
+                                        val convertedTransactions =
+                                            DummyRepository.convertBackendTransactions(latestTransactions)
+
+                                        DummyRepository.setBackendTransactions(convertedTransactions)
+
+                                        val latestTransaction = DummyRepository.getTransactions()
+                                            .firstOrNull {
+                                                it.amount == amount &&
+                                                        it.status == "SUCCESS" &&
+                                                        it.transactionType.uppercase() == "QRIS"
+                                            }
+                                            ?: DummyRepository.getTransactions().firstOrNull()
+
+                                        if (latestTransaction != null) {
+                                            transactionIdForResult = latestTransaction.transactionId
                                         }
-                                        ?: DummyRepository.getTransactions().firstOrNull()
+                                    } catch (_: Exception) {
+                                    }
 
                                     showToast("Pembayaran QRIS berhasil")
 
                                     navController.navigate(
-                                        "payment_result/${latestTransaction?.transactionId ?: "TRX-TERBARU"}"
+                                        "payment_result/$transactionIdForResult"
                                     ) {
                                         popUpTo("qris_payment") {
                                             inclusive = true
@@ -229,7 +247,7 @@ fun AppNavigation() {
                                 }
 
                                 else -> {
-                                    showToast("Pembayaran QRIS gagal: ${paymentResponse.status}")
+                                    showToast("Pembayaran QRIS gagal: ${paymentResponse.message ?: paymentResponse.status}")
                                 }
                             }
                         } catch (e: Exception) {
@@ -245,34 +263,55 @@ fun AppNavigation() {
                 onBack = {
                     navController.popBackStack()
                 },
-                onSubmitTransaction = { amount, _ ->
+                onSubmitTransfer = { recipientUserId, amount, _ ->
                     scope.launch {
                         try {
+                            val currentUserId = DummyRepository.getCurrentUserId()
+                            val referenceNo = "TRF-${System.currentTimeMillis()}"
+
                             val paymentResponse = RetrofitClient.api.createPayment(
                                 request = PaymentRequest(
-                                    userId = 1,
-                                    amount = amount
+                                    userId = currentUserId,
+                                    recipientUserId = recipientUserId,
+                                    amount = amount,
+                                    referenceNo = referenceNo
                                 )
                             )
 
                             when (paymentResponse.status) {
                                 "SUCCESS" -> {
-                                    val latestTransactions = RetrofitClient.api.getTransactions(1)
-                                    val convertedTransactions =
-                                        DummyRepository.convertBackendTransactions(latestTransactions)
+                                    var transactionIdForResult =
+                                        paymentResponse.transactionId?.let {
+                                            "TRX-${it.toString().padStart(3, '0')}"
+                                        } ?: "TRX-TERBARU"
 
-                                    DummyRepository.setBackendTransactions(convertedTransactions)
+                                    try {
+                                        val latestTransactions =
+                                            RetrofitClient.api.getTransactions(currentUserId)
 
-                                    val latestTransaction = DummyRepository.getTransactions()
-                                        .firstOrNull {
-                                            it.amount == amount && it.status == "SUCCESS"
+                                        val convertedTransactions =
+                                            DummyRepository.convertBackendTransactions(latestTransactions)
+
+                                        DummyRepository.setBackendTransactions(convertedTransactions)
+
+                                        val latestTransaction = DummyRepository.getTransactions()
+                                            .firstOrNull {
+                                                it.amount == amount &&
+                                                        it.status == "SUCCESS" &&
+                                                        it.recipientUserId == recipientUserId
+                                            }
+                                            ?: DummyRepository.getTransactions().firstOrNull()
+
+                                        if (latestTransaction != null) {
+                                            transactionIdForResult = latestTransaction.transactionId
                                         }
-                                        ?: DummyRepository.getTransactions().firstOrNull()
+                                    } catch (_: Exception) {
+                                    }
 
-                                    showToast("Transaksi berhasil")
+                                    showToast("Transfer berhasil")
 
                                     navController.navigate(
-                                        "payment_result/${latestTransaction?.transactionId ?: "TRX-TERBARU"}"
+                                        "payment_result/$transactionIdForResult"
                                     ) {
                                         popUpTo("regular_transaction") {
                                             inclusive = true
@@ -284,20 +323,20 @@ fun AppNavigation() {
                                     showToast("Saldo tidak mencukupi.")
                                 }
 
-                                "USER_NOT_FOUND" -> {
-                                    showToast("User tidak ditemukan.")
+                                "USER_NOT_FOUND", "INVALID_INPUT" -> {
+                                    showToast(paymentResponse.message ?: "User penerima tidak ditemukan.")
                                 }
 
                                 "TIMEOUT", "SYSTEM_BUSY" -> {
-                                    showToast("Sistem sedang sibuk. Silakan coba lagi.")
+                                    showToast(paymentResponse.message ?: "Sistem sedang sibuk. Silakan coba lagi.")
                                 }
 
                                 else -> {
-                                    showToast("Transaksi gagal: ${paymentResponse.status}")
+                                    showToast("Transfer gagal: ${paymentResponse.message ?: paymentResponse.status}")
                                 }
                             }
                         } catch (e: Exception) {
-                            showToast("Transaksi gagal. Pastikan backend baseline berjalan.")
+                            showToast("Transfer gagal: ${e.message ?: "koneksi backend bermasalah"}")
                         }
                     }
                 }
@@ -316,7 +355,7 @@ fun AppNavigation() {
                 ?.getString("transactionId")
                 .orEmpty()
 
-            PaymentResultScreen(
+            PaymentResultV2Screen(
                 transactionId = transactionId,
                 onBackHome = {
                     navController.navigate("user_home") {
@@ -332,7 +371,7 @@ fun AppNavigation() {
         }
 
         composable("history") {
-            TransactionHistoryScreen(
+            TransferHistoryScreen(
                 onBack = {
                     navController.popBackStack()
                 },
@@ -354,7 +393,7 @@ fun AppNavigation() {
                 ?.getString("transactionId")
                 .orEmpty()
 
-            TransactionDetailScreen(
+            TransferDetailScreen(
                 transactionId = transactionId,
                 onBack = {
                     navController.popBackStack()

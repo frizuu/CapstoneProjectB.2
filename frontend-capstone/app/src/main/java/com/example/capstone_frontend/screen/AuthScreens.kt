@@ -18,9 +18,9 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -237,7 +237,7 @@ fun LandingScreen(
 
             AccessOptionCard(
                 title = "Nasabah",
-                description = "Masuk untuk melakukan pembayaran QRIS, transaksi biasa, melihat saldo, riwayat, dan status transaksi.",
+                description = "Masuk menggunakan nama atau ID user dari data baseline.",
                 iconText = "N",
                 buttonText = "Masuk sebagai Nasabah",
                 isPrimary = true,
@@ -403,14 +403,6 @@ fun UserLoginScreen(
     onLoginSuccess: () -> Unit,
     onBack: () -> Unit
 ) {
-    var mode by remember {
-        mutableStateOf("choice")
-    }
-
-    var fullName by remember {
-        mutableStateOf("")
-    }
-
     var username by remember {
         mutableStateOf("")
     }
@@ -423,13 +415,11 @@ fun UserLoginScreen(
         mutableStateOf("")
     }
 
-    val registeredUser = DummyRepository.getRegisteredUser()
-
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .background(AppColor.Background)
-            .padding(22.dp)
+            .padding(horizontal = 22.dp)
     ) {
         item {
             Spacer(modifier = Modifier.height(34.dp))
@@ -446,342 +436,201 @@ fun UserLoginScreen(
 
             Spacer(modifier = Modifier.height(18.dp))
 
-            Text(
-                text = when (mode) {
-                    "register" -> "Buat Akun Nasabah"
-                    "login" -> "Masuk Nasabah"
-                    else -> "Selamat Datang"
-                },
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
-                color = AppColor.TextDark
-            )
+            LoginHeaderCard()
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(22.dp))
 
-            Text(
-                text = when (mode) {
-                    "register" -> "Lengkapi data akun untuk menggunakan layanan."
-                    "login" -> "Masukkan password untuk masuk ke akun Anda."
-                    else -> "Pilih apakah Anda sudah memiliki akun atau ingin membuat akun baru."
-                },
-                style = MaterialTheme.typography.bodyMedium,
-                color = AppColor.TextGray
-            )
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(32.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                elevation = CardDefaults.cardElevation(defaultElevation = 5.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(22.dp)
+                ) {
+                    Text(
+                        text = "Masuk ke Akun",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = AppColor.TextDark
+                    )
 
-            Spacer(modifier = Modifier.height(26.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
 
-            when (mode) {
-                "choice" -> {
-                    Card(
+                    Text(
+                        text = "Gunakan nama akun atau User ID yang terdaftar.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = AppColor.TextGray
+                    )
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    OutlinedTextField(
+                        value = username,
+                        onValueChange = {
+                            username = it
+                            errorMessage = ""
+                        },
+                        label = {
+                            Text("Username / Nama Akun")
+                        },
+                        placeholder = {
+                            Text("Masukkan username")
+                        },
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(26.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color.White),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(20.dp)
-                        ) {
-                            Text(
-                                text = "Sudah memiliki akun?",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = AppColor.TextDark
-                            )
+                        singleLine = true,
+                        shape = RoundedCornerShape(18.dp)
+                    )
 
-                            Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
 
-                            Text(
-                                text = "Jika sudah memiliki akun, lanjutkan dengan password. Jika belum, buat akun baru terlebih dahulu.",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = AppColor.TextGray
-                            )
+                    OutlinedTextField(
+                        value = password,
+                        onValueChange = {
+                            password = it
+                            errorMessage = ""
+                        },
+                        label = {
+                            Text("Password")
+                        },
+                        placeholder = {
+                            Text("Masukkan password")
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        shape = RoundedCornerShape(18.dp),
+                        visualTransformation = PasswordVisualTransformation()
+                    )
 
-                            Spacer(modifier = Modifier.height(22.dp))
+                    if (errorMessage.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(10.dp))
 
-                            Button(
-                                onClick = {
-                                    mode = "login"
-                                    username = registeredUser.username
-                                    password = ""
-                                    errorMessage = ""
-                                },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(56.dp),
-                                shape = RoundedCornerShape(22.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = AppColor.Primary,
-                                    contentColor = Color.White
-                                )
-                            ) {
-                                Text(
-                                    text = "Sudah Punya Akun",
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.height(12.dp))
-
-                            OutlinedButton(
-                                onClick = {
-                                    mode = "register"
-                                    fullName = ""
-                                    username = ""
-                                    password = ""
-                                    errorMessage = ""
-                                },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(56.dp),
-                                shape = RoundedCornerShape(22.dp)
-                            ) {
-                                Text(
-                                    text = "Buat Akun Baru",
-                                    color = AppColor.Primary,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
+                        Text(
+                            text = errorMessage,
+                            color = Color(0xFFC62828),
+                            style = MaterialTheme.typography.bodySmall
+                        )
                     }
-                }
 
-                "login" -> {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(26.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color.White),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(20.dp)
-                        ) {
-                            Text(
-                                text = registeredUser.fullName,
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold,
-                                color = AppColor.TextDark
-                            )
+                    Spacer(modifier = Modifier.height(22.dp))
 
-                            Spacer(modifier = Modifier.height(4.dp))
+                    Button(
+                        onClick = {
+                            when {
+                                username.isBlank() -> {
+                                    errorMessage = "Username atau nama akun wajib diisi."
+                                }
 
-                            Text(
-                                text = "Username: ${registeredUser.username}",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = AppColor.TextGray
-                            )
+                                password.isBlank() -> {
+                                    errorMessage = "Password wajib diisi."
+                                }
 
-                            Spacer(modifier = Modifier.height(18.dp))
-
-                            OutlinedTextField(
-                                value = password,
-                                onValueChange = {
-                                    password = it
-                                    errorMessage = ""
-                                },
-                                label = {
-                                    Text("Password")
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                                singleLine = true,
-                                visualTransformation = PasswordVisualTransformation()
-                            )
-
-                            if (errorMessage.isNotBlank()) {
-                                Spacer(modifier = Modifier.height(10.dp))
-
-                                Text(
-                                    text = errorMessage,
-                                    color = Color(0xFFC62828),
-                                    style = MaterialTheme.typography.bodySmall
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.height(22.dp))
-
-                            Button(
-                                onClick = {
+                                else -> {
                                     val success = DummyRepository.loginUser(
-                                        username = registeredUser.username,
+                                        username = username,
                                         password = password
                                     )
 
                                     if (success) {
                                         onLoginSuccess()
                                     } else {
-                                        errorMessage = "Password salah. Gunakan user123 untuk akun demo."
+                                        errorMessage = "Username atau password salah."
                                     }
-                                },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(56.dp),
-                                shape = RoundedCornerShape(22.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = AppColor.Primary,
-                                    contentColor = Color.White
-                                )
-                            ) {
-                                Text(
-                                    text = "Masuk",
-                                    fontWeight = FontWeight.Bold
-                                )
+                                }
                             }
-
-                            Spacer(modifier = Modifier.height(12.dp))
-
-                            TextButton(
-                                onClick = {
-                                    mode = "register"
-                                    fullName = ""
-                                    username = ""
-                                    password = ""
-                                    errorMessage = ""
-                                },
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(
-                                    text = "Gunakan akun lain / buat akun baru",
-                                    color = AppColor.Primary,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-
-                            Text(
-                                text = "Akun demo: user • Password: user123",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = AppColor.TextGray
-                            )
-                        }
-                    }
-                }
-
-                "register" -> {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(26.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color.White),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(58.dp),
+                        shape = RoundedCornerShape(22.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = AppColor.Primary,
+                            contentColor = Color.White
+                        )
                     ) {
-                        Column(
-                            modifier = Modifier.padding(20.dp)
-                        ) {
-                            OutlinedTextField(
-                                value = fullName,
-                                onValueChange = {
-                                    fullName = it
-                                    errorMessage = ""
-                                },
-                                label = {
-                                    Text("Nama Lengkap")
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                                singleLine = true
-                            )
-
-                            Spacer(modifier = Modifier.height(14.dp))
-
-                            OutlinedTextField(
-                                value = username,
-                                onValueChange = {
-                                    username = it.lowercase().replace(" ", "")
-                                    errorMessage = ""
-                                },
-                                label = {
-                                    Text("Username")
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                                singleLine = true
-                            )
-
-                            Spacer(modifier = Modifier.height(14.dp))
-
-                            OutlinedTextField(
-                                value = password,
-                                onValueChange = {
-                                    password = it
-                                    errorMessage = ""
-                                },
-                                label = {
-                                    Text("Password")
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                                singleLine = true,
-                                visualTransformation = PasswordVisualTransformation()
-                            )
-
-                            if (errorMessage.isNotBlank()) {
-                                Spacer(modifier = Modifier.height(10.dp))
-
-                                Text(
-                                    text = errorMessage,
-                                    color = Color(0xFFC62828),
-                                    style = MaterialTheme.typography.bodySmall
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.height(22.dp))
-
-                            Button(
-                                onClick = {
-                                    when {
-                                        fullName.isBlank() -> {
-                                            errorMessage = "Nama lengkap wajib diisi."
-                                        }
-
-                                        username.isBlank() -> {
-                                            errorMessage = "Username wajib diisi."
-                                        }
-
-                                        password.length < 6 -> {
-                                            errorMessage = "Password minimal 6 karakter."
-                                        }
-
-                                        else -> {
-                                            DummyRepository.registerUser(
-                                                fullName = fullName,
-                                                username = username,
-                                                password = password
-                                            )
-                                            onLoginSuccess()
-                                        }
-                                    }
-                                },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(56.dp),
-                                shape = RoundedCornerShape(22.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = AppColor.Primary,
-                                    contentColor = Color.White
-                                )
-                            ) {
-                                Text(
-                                    text = "Buat Akun",
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.height(12.dp))
-
-                            TextButton(
-                                onClick = {
-                                    mode = "login"
-                                    password = ""
-                                    errorMessage = ""
-                                },
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(
-                                    text = "Sudah punya akun? Masuk",
-                                    color = AppColor.Primary,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-                        }
+                        Text(
+                            text = "Masuk",
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+fun LoginHeaderCard() {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(30.dp),
+        colors = CardDefaults.cardColors(containerColor = AppColor.Primary),
+        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(24.dp)
+        ) {
+            Text(
+                text = "Selamat Datang",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = "Masuk untuk mengakses layanan pembayaran, transfer, saldo, dan riwayat transaksi.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color(0xFFFFDDE6)
+            )
+
+            Spacer(modifier = Modifier.height(18.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                LoginFeatureChip(
+                    text = "Saldo",
+                    modifier = Modifier.weight(1f)
+                )
+
+                LoginFeatureChip(
+                    text = "QRIS",
+                    modifier = Modifier.weight(1f)
+                )
+
+                LoginFeatureChip(
+                    text = "Riwayat",
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun LoginFeatureChip(
+    text: String,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .height(42.dp)
+            .background(
+                color = Color(0x22FFFFFF),
+                shape = RoundedCornerShape(16.dp)
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodySmall,
+            color = Color.White,
+            fontWeight = FontWeight.SemiBold
+        )
     }
 }
 

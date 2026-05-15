@@ -3,6 +3,7 @@ package com.example.capstone_frontend.screen
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Visibility
@@ -22,7 +24,6 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -37,9 +38,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.capstone_frontend.component.AppColor
-import com.example.capstone_frontend.component.FeatureMenuItem
 import com.example.capstone_frontend.component.formatRupiah
 import com.example.capstone_frontend.data.DummyRepository
 import com.example.capstone_frontend.data.RetrofitClient
@@ -57,168 +58,62 @@ fun UserHomeScreen(
         mutableIntStateOf(0)
     }
 
-    var showBalance by remember {
+    var isBalanceLoaded by remember {
         mutableStateOf(false)
-    }
-
-    var isLoadingBalance by remember {
-        mutableStateOf(true)
     }
 
     var balanceError by remember {
-        mutableStateOf(false)
+        mutableStateOf("")
+    }
+
+    var isBalanceVisible by remember {
+        mutableStateOf(true)
     }
 
     var showLogoutDialog by remember {
         mutableStateOf(false)
     }
 
-    var showDeleteAccountDialog by remember {
+    var showDeleteDialog by remember {
         mutableStateOf(false)
     }
 
-    val userFirstName = DummyRepository.getCurrentUserFirstName()
-    val userFullName = DummyRepository.getCurrentUserName()
+    val currentUserName = DummyRepository.getCurrentUserFirstName()
+    val currentUserId = DummyRepository.getCurrentUserId()
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(currentUserId) {
         try {
-            isLoadingBalance = true
-            balanceError = false
+            isBalanceLoaded = false
+            balanceError = ""
 
-            val response = RetrofitClient.api.getBalance(1)
+            val response = RetrofitClient.api.getBalance(currentUserId)
+
             balance = response.balance
+            isBalanceLoaded = true
+            balanceError = ""
         } catch (e: Exception) {
-            balanceError = true
-        } finally {
-            isLoadingBalance = false
+            isBalanceLoaded = false
+            balanceError = e.message ?: e.toString()
         }
-    }
-
-    if (showLogoutDialog) {
-        AlertDialog(
-            onDismissRequest = {
-                showLogoutDialog = false
-            },
-            title = {
-                Text(
-                    text = "Keluar dari Akun?",
-                    fontWeight = FontWeight.Bold,
-                    color = AppColor.TextDark
-                )
-            },
-            text = {
-                Text(
-                    text = "Anda akan keluar dari akun $userFirstName. Pastikan semua transaksi sudah selesai sebelum keluar.",
-                    color = AppColor.TextGray
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        showLogoutDialog = false
-                        DummyRepository.logoutUser()
-                        onLogout()
-                    },
-                    shape = RoundedCornerShape(16.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = AppColor.Primary,
-                        contentColor = Color.White
-                    )
-                ) {
-                    Text(
-                        text = "Ya, Keluar",
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = {
-                        showLogoutDialog = false
-                    }
-                ) {
-                    Text(
-                        text = "Batal",
-                        color = AppColor.Primary,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-            },
-            containerColor = Color.White,
-            shape = RoundedCornerShape(24.dp)
-        )
-    }
-
-    if (showDeleteAccountDialog) {
-        AlertDialog(
-            onDismissRequest = {
-                showDeleteAccountDialog = false
-            },
-            title = {
-                Text(
-                    text = "Hapus Akun?",
-                    fontWeight = FontWeight.Bold,
-                    color = AppColor.TextDark
-                )
-            },
-            text = {
-                Text(
-                    text = "Akun $userFullName akan dihapus dari perangkat ini. Anda akan keluar dari akun, dan perlu membuat akun baru atau masuk kembali untuk menggunakan layanan.",
-                    color = AppColor.TextGray
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        showDeleteAccountDialog = false
-                        DummyRepository.deleteCurrentAccount()
-                        onLogout()
-                    },
-                    shape = RoundedCornerShape(16.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFFC62828),
-                        contentColor = Color.White
-                    )
-                ) {
-                    Text(
-                        text = "Hapus Akun",
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = {
-                        showDeleteAccountDialog = false
-                    }
-                ) {
-                    Text(
-                        text = "Batal",
-                        color = AppColor.Primary,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-            },
-            containerColor = Color.White,
-            shape = RoundedCornerShape(24.dp)
-        )
     }
 
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .background(AppColor.Background)
-            .padding(20.dp)
+            .padding(horizontal = 22.dp)
     ) {
         item {
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(44.dp))
 
             Text(
-                text = "Selamat siang, $userFirstName",
+                text = "Selamat siang, $currentUserName",
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
                 color = AppColor.TextDark
             )
+
+            Spacer(modifier = Modifier.height(4.dp))
 
             Text(
                 text = "Siap melakukan transaksi hari ini?",
@@ -226,70 +121,82 @@ fun UserHomeScreen(
                 color = AppColor.TextGray
             )
 
-            Spacer(modifier = Modifier.height(18.dp))
+            Spacer(modifier = Modifier.height(22.dp))
 
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(28.dp),
                 colors = CardDefaults.cardColors(containerColor = AppColor.Primary),
-                elevation = CardDefaults.cardElevation(defaultElevation = 5.dp)
+                elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(22.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(
                         modifier = Modifier.weight(1f)
                     ) {
                         Text(
                             text = "Intip Saldo",
-                            color = Color(0xFFFFD6D6),
-                            style = MaterialTheme.typography.bodyMedium
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color(0xFFFFD6D6)
                         )
 
                         Spacer(modifier = Modifier.height(8.dp))
 
-                        Text(
-                            text = when {
-                                isLoadingBalance -> "Memuat saldo..."
-                                balanceError -> "Saldo belum tersedia"
-                                showBalance -> formatRupiah(balance)
-                                else -> "Rp •••••••"
-                            },
-                            color = Color.White,
-                            style = MaterialTheme.typography.headlineMedium,
-                            fontWeight = FontWeight.Bold
-                        )
+                        if (isBalanceLoaded) {
+                            Text(
+                                text = if (isBalanceVisible) {
+                                    formatRupiah(balance)
+                                } else {
+                                    "Rp ••••••"
+                                },
+                                style = MaterialTheme.typography.headlineMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
 
-                        Spacer(modifier = Modifier.height(10.dp))
+                            Spacer(modifier = Modifier.height(8.dp))
 
-                        Text(
-                            text = if (balanceError) {
-                                "Periksa koneksi dan coba kembali."
-                            } else {
-                                "Gunakan saldo untuk QRIS dan transfer."
-                            },
-                            color = Color(0xFFFFD6D6),
-                            style = MaterialTheme.typography.bodySmall
-                        )
+                            Text(
+                                text = "User ID $currentUserId • Saldo berhasil dimuat.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(0xFFFFE2E8)
+                            )
+                        } else {
+                            Text(
+                                text = "Saldo belum tersedia",
+                                style = MaterialTheme.typography.headlineSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Text(
+                                text = "User ID $currentUserId • Gagal memuat saldo.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(0xFFFFE2E8)
+                            )
+                        }
                     }
 
-                    IconButton(
-                        onClick = {
-                            showBalance = !showBalance
-                        },
+                    Box(
                         modifier = Modifier
-                            .size(48.dp)
+                            .size(52.dp)
                             .background(
                                 color = Color(0x22FFFFFF),
-                                shape = RoundedCornerShape(24.dp)
+                                shape = CircleShape
                             )
+                            .clickable {
+                                isBalanceVisible = !isBalanceVisible
+                            },
+                        contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = if (showBalance) {
+                            imageVector = if (isBalanceVisible) {
                                 Icons.Filled.Visibility
                             } else {
                                 Icons.Filled.VisibilityOff
@@ -301,68 +208,74 @@ fun UserHomeScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(28.dp))
+            if (balanceError.isNotBlank()) {
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFFEBEE)),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp)
+                    ) {
+                        Text(
+                            text = "Detail error saldo",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFC62828)
+                        )
+
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        Text(
+                            text = balanceError,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFFC62828)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(26.dp))
 
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(26.dp),
                 colors = CardDefaults.cardColors(containerColor = Color.White),
-                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                elevation = CardDefaults.cardElevation(defaultElevation = 5.dp)
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 18.dp, horizontal = 14.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                        .padding(vertical = 18.dp, horizontal = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceAround,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column(
-                        modifier = Modifier.clickable {
-                            onPayQrisClick()
-                        },
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        FeatureMenuItem(
-                            title = "QR Bayar",
-                            iconText = "QR"
-                        )
-                    }
+                    HomeMenuItem(
+                        iconText = "QR",
+                        label = "QR Bayar",
+                        onClick = onPayQrisClick
+                    )
 
-                    Column(
-                        modifier = Modifier.clickable {
-                            onRegularTransactionClick()
-                        },
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        FeatureMenuItem(
-                            title = "Transfer",
-                            iconText = "TF"
-                        )
-                    }
+                    HomeMenuItem(
+                        iconText = "TF",
+                        label = "Transfer",
+                        onClick = onRegularTransactionClick
+                    )
 
-                    Column(
-                        modifier = Modifier.clickable {
-                            onHistoryClick()
-                        },
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        FeatureMenuItem(
-                            title = "Riwayat",
-                            iconText = "≡"
-                        )
-                    }
+                    HomeMenuItem(
+                        iconText = "≡",
+                        label = "Riwayat",
+                        onClick = onHistoryClick
+                    )
 
-                    Column(
-                        modifier = Modifier.clickable {
-                            onStatusClick()
-                        },
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        FeatureMenuItem(
-                            title = "Status",
-                            iconText = "✓"
-                        )
-                    }
+                    HomeMenuItem(
+                        iconText = "✓",
+                        label = "Status",
+                        onClick = onStatusClick
+                    )
                 }
             }
 
@@ -370,9 +283,9 @@ fun UserHomeScreen(
 
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(24.dp),
+                shape = RoundedCornerShape(26.dp),
                 colors = CardDefaults.cardColors(containerColor = Color.White),
-                elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
             ) {
                 Column(
                     modifier = Modifier.padding(18.dp)
@@ -392,7 +305,7 @@ fun UserHomeScreen(
                         color = AppColor.TextGray
                     )
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(18.dp))
 
                     Button(
                         onClick = {
@@ -400,8 +313,8 @@ fun UserHomeScreen(
                         },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(52.dp),
-                        shape = RoundedCornerShape(18.dp),
+                            .height(54.dp),
+                        shape = RoundedCornerShape(20.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = AppColor.Primary,
                             contentColor = Color.White
@@ -413,17 +326,17 @@ fun UserHomeScreen(
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
                     TextButton(
                         onClick = {
-                            showDeleteAccountDialog = true
+                            showDeleteDialog = true
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
                             text = "Hapus Akun",
-                            color = Color(0xFFC62828),
+                            color = Color(0xFFD32F2F),
                             fontWeight = FontWeight.Bold
                         )
                     }
@@ -432,5 +345,132 @@ fun UserHomeScreen(
 
             Spacer(modifier = Modifier.height(28.dp))
         }
+    }
+
+    if (showLogoutDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showLogoutDialog = false
+            },
+            title = {
+                Text(
+                    text = "Logout dari akun?",
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    text = "Anda akan keluar dari akun nasabah yang sedang digunakan. Anda dapat masuk kembali dengan username dan password."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showLogoutDialog = false
+                        DummyRepository.logoutUser()
+                        onLogout()
+                    }
+                ) {
+                    Text(
+                        text = "Logout",
+                        color = AppColor.Primary,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showLogoutDialog = false
+                    }
+                ) {
+                    Text("Batal")
+                }
+            }
+        )
+    }
+
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showDeleteDialog = false
+            },
+            title = {
+                Text(
+                    text = "Hapus akun?",
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    text = "Akses akun nasabah yang sedang digunakan akan dihapus dari aplikasi. Data transaksi tetap tersimpan pada sistem backend."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteDialog = false
+                        DummyRepository.deleteCurrentAccount()
+                        onLogout()
+                    }
+                ) {
+                    Text(
+                        text = "Hapus Akun",
+                        color = Color(0xFFD32F2F),
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteDialog = false
+                    }
+                ) {
+                    Text("Batal")
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun HomeMenuItem(
+    iconText: String,
+    label: String,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier.clickable {
+            onClick()
+        },
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            modifier = Modifier
+                .size(54.dp)
+                .background(
+                    color = Color(0xFFFFEEF4),
+                    shape = RoundedCornerShape(18.dp)
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = iconText,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = AppColor.Primary,
+                textAlign = TextAlign.Center
+            )
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = AppColor.TextDark,
+            textAlign = TextAlign.Center
+        )
     }
 }

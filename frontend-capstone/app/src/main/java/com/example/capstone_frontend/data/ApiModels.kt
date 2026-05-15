@@ -11,8 +11,14 @@ data class PaymentRequest(
     @SerializedName("user_id")
     val userId: Int,
 
+    @SerializedName("recipient_user_id")
+    val recipientUserId: Int? = null,
+
     @SerializedName("amount")
-    val amount: Int
+    val amount: Int,
+
+    @SerializedName("reference_no")
+    val referenceNo: String? = null
 )
 
 data class PaymentResponse(
@@ -27,6 +33,9 @@ data class PaymentResponse(
 
     @SerializedName("transaction_id")
     val transactionId: Int? = null,
+
+    @SerializedName("reference_no")
+    val referenceNo: String? = null,
 
     @SerializedName("audit_id")
     val auditId: Int? = null
@@ -57,7 +66,10 @@ data class QrisPaymentRequest(
     val merchantCode: String,
 
     @SerializedName("amount")
-    val amount: Int
+    val amount: Int,
+
+    @SerializedName("reference_no")
+    val referenceNo: String? = null
 )
 
 data class MerchantBalanceResponse(
@@ -99,6 +111,23 @@ data class MerchantDto(
     val createdAt: String
 )
 
+data class TransactionHistoryResponse(
+    @SerializedName("status")
+    val status: String,
+
+    @SerializedName("code")
+    val code: String? = null,
+
+    @SerializedName("message")
+    val message: String? = null,
+
+    @SerializedName("user_id")
+    val userId: Int? = null,
+
+    @SerializedName("transactions")
+    val transactions: List<BackendTransactionResponse> = emptyList()
+)
+
 data class BackendTransactionResponse(
     @SerializedName("id")
     val id: Int,
@@ -106,8 +135,23 @@ data class BackendTransactionResponse(
     @SerializedName("user_id")
     val userId: Int,
 
+    @SerializedName("sender_name")
+    val senderName: String? = null,
+
     @SerializedName("merchant_id")
     val merchantId: Int? = null,
+
+    @SerializedName("merchant_name")
+    val merchantName: String? = null,
+
+    @SerializedName("merchant_code")
+    val merchantCode: String? = null,
+
+    @SerializedName("recipient_user_id")
+    val recipientUserId: Int? = null,
+
+    @SerializedName("recipient_user_name")
+    val recipientUserName: String? = null,
 
     @SerializedName("amount")
     val amount: Int,
@@ -118,11 +162,14 @@ data class BackendTransactionResponse(
     @SerializedName("transaction_type")
     val transactionType: String? = null,
 
+    @SerializedName("direction")
+    val direction: String? = null,
+
+    @SerializedName("reference_no")
+    val referenceNo: String? = null,
+
     @SerializedName("created_at")
     val createdAt: String,
-
-    @SerializedName("merchant_name")
-    val merchantName: String? = null,
 
     @SerializedName("idempotency_key")
     val idempotencyKey: String? = null
