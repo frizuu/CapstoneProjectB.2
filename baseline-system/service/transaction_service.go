@@ -3,11 +3,14 @@ package service
 import (
 	"baseline-system/cache"
 	"baseline-system/legacy"
+	"baseline-system/messaging"
 	"baseline-system/repository"
 	"database/sql"
 	"fmt"
 	"strconv"
 	"time"
+
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 type TransactionService struct {
@@ -16,6 +19,7 @@ type TransactionService struct {
 	UserRepo     *repository.UserRepo
 	MerchantRepo *repository.MerchantRepo
 	Cache        *cache.RedisCache
+	RabbitMQ     *amqp.Channel // Injected RabbitMQ Channel
 }
 
 // Process - pembayaran umum (existing)
@@ -72,6 +76,17 @@ func (s *TransactionService) Process(userID int, amount int) string {
 		strconv.Itoa(newBalance),
 		10*time.Minute,
 	)
+
+	// ---> ASYNC DECOUPLING: Broadcast standard payment event
+	if s.RabbitMQ != nil {
+		go messaging.PublishTransactionEvent(s.RabbitMQ, messaging.EventPayload{
+			TransactionID: fmt.Sprintf("TX-REG-%d-%d", userID, time.Now().Unix()),
+			UserID:        userID,
+			Amount:        amount,
+			Status:        result,
+			Timestamp:     time.Now().Format(time.RFC3339),
+		})
+	}
 
 	return result
 }
@@ -156,6 +171,18 @@ func (s *TransactionService) ProcessQRIS(userID int, merchantCode string, amount
 		fmt.Sprintf("%d", newMerchantBalance),
 		10*time.Minute,
 	)
+
+	// ---> ASYNC DECOUPLING: Broadcast QRIS payment event
+	if s.RabbitMQ != nil {
+		go messaging.PublishTransactionEvent(s.RabbitMQ, messaging.EventPayload{
+			TransactionID: fmt.Sprintf("TX-QRIS-%d-%d", userID, time.Now().Unix()),
+			UserID:        userID,
+			MerchantCode:  merchantCode,
+			Amount:        amount,
+			Status:        result,
+			Timestamp:     time.Now().Format(time.RFC3339),
+		})
+	}
 
 	return result
 }
