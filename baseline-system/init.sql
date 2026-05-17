@@ -22,16 +22,48 @@ CREATE TABLE IF NOT EXISTS public.merchants (
 );
 
 CREATE TABLE IF NOT EXISTS public.transactions (
-    id         SERIAL PRIMARY KEY,
-    user_id    integer REFERENCES public.users(id),
-    amount     integer,
-    status     character varying(50),
-    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+    id               SERIAL PRIMARY KEY,
+    user_id          integer REFERENCES public.users(id),
+    merchant_id      integer REFERENCES public.merchants(id),
+    recipient_user_id integer REFERENCES public.users(id),
+    amount           integer,
+    status           character varying(50),
+    transaction_type character varying(50),
+    reference_no     character varying(100),
+    reversal_of_transaction_id integer REFERENCES public.transactions(id),
+    created_at       timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS public.ledger_entries (
+    id             SERIAL PRIMARY KEY,
+    transaction_id integer REFERENCES public.transactions(id),
+    account_type   character varying(20),
+    account_id     integer,
+    direction      character varying(10),
+    amount         bigint,
+    entry_type     character varying(50),
+    created_at     timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS public.audit_logs (
+    id            SERIAL PRIMARY KEY,
+    event_type    character varying(50),
+    event_sub_type character varying(50),
+    reference_id  integer,
+    status        character varying(50),
+    message       text,
+    payload       text,
+    created_at    timestamp without time zone DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_merchants_merchant_code ON public.merchants(merchant_code);
 CREATE INDEX IF NOT EXISTS idx_merchants_status        ON public.merchants(status);
 CREATE INDEX IF NOT EXISTS idx_transactions_user_id    ON public.transactions(user_id);
+CREATE INDEX IF NOT EXISTS idx_transactions_recipient_user_id ON public.transactions(recipient_user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_reference_no ON public.transactions(reference_no) WHERE reference_no IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_transactions_reversal_of_transaction_id ON public.transactions(reversal_of_transaction_id);
+CREATE INDEX IF NOT EXISTS idx_ledger_transaction_id   ON public.ledger_entries(transaction_id);
+CREATE INDEX IF NOT EXISTS idx_audit_reference_id      ON public.audit_logs(reference_id);
 
 -- =============================================
 -- DATA: 100 users

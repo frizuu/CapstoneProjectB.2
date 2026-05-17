@@ -9,7 +9,6 @@ services:
       - "8080:8080"
     depends_on:
       - db
-      - redis
       - rabbitmq
     environment:
       - DB_HOST=db
@@ -17,8 +16,6 @@ services:
       - DB_USER=postgres
       - DB_PASS=postgres
       - DB_NAME=bank
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
 
   db:
@@ -58,5 +55,6 @@ services:
 
 volumes:
   postgres_data:
+
   redis_data:
   rabbitmq_data:

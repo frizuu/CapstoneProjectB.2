@@ -2,6 +2,7 @@ package handler
 
 import (
 	"baseline-system/repository"
+	"baseline-system/service"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -9,10 +10,9 @@ import (
 
 type MerchantHandler struct {
 	MerchantRepo *repository.MerchantRepo
+	Service      *service.TransactionService
 }
 
-// InquiryQRIS - GET /qris/inquiry?merchant_code=NMID001234567890
-// Mengambil informasi merchant berdasarkan merchant_code dari QR
 func (h *MerchantHandler) InquiryQRIS(w http.ResponseWriter, r *http.Request) {
 	merchantCode := r.URL.Query().Get("merchant_code")
 	if merchantCode == "" {
@@ -36,8 +36,6 @@ func (h *MerchantHandler) InquiryQRIS(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GetMerchantBalance - GET /merchant/balance?merchant_id=1
-// Mengambil saldo merchant berdasarkan ID
 func (h *MerchantHandler) GetMerchantBalance(w http.ResponseWriter, r *http.Request) {
 	merchantIDStr := r.URL.Query().Get("merchant_id")
 	merchantID, err := strconv.Atoi(merchantIDStr)
@@ -46,21 +44,12 @@ func (h *MerchantHandler) GetMerchantBalance(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	balance, err := h.MerchantRepo.GetBalance(merchantID)
-	if err != nil {
-		http.Error(w, "Merchant not found", http.StatusNotFound)
-		return
-	}
+	result := h.Service.MerchantBalanceInquiry(merchantID)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"merchant_id": merchantID,
-		"balance":     balance,
-	})
+	json.NewEncoder(w).Encode(result)
 }
 
-// GetAllMerchants - GET /merchants
-// Mengambil semua merchant yang aktif
 func (h *MerchantHandler) GetAllMerchants(w http.ResponseWriter, r *http.Request) {
 	merchants, err := h.MerchantRepo.GetAll()
 	if err != nil {
