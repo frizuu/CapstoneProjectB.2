@@ -1,8 +1,8 @@
 package service
 
 import (
+	"baseline-system/cache"
 	"baseline-system/legacy"
-	"baseline-system/messaging"
 	"baseline-system/model"
 	"baseline-system/repository"
 	"database/sql"
@@ -17,17 +17,10 @@ type TransactionService struct {
 	Repo         *repository.TransactionRepo
 	UserRepo     *repository.UserRepo
 	MerchantRepo *repository.MerchantRepo
+	AuditRepo    *repository.AuditRepo  // Moved back to struct
+	LedgerRepo   *repository.LedgerRepo // Moved back to struct
 	Cache        *cache.RedisCache
 	RabbitMQ     *amqp.Channel // Injected RabbitMQ Channel
-}
-
-// Process - pembayaran umum (existing)
-func (s *TransactionService) Process(userID int, amount int) string {
-
-	// READ: cek saldo dari cache dulu
-	balance, err := s.getUserBalanceWithCache(userID)
-	AuditRepo    *repository.AuditRepo
-	LedgerRepo   *repository.LedgerRepo
 }
 
 type TransactionResult struct {
@@ -385,9 +378,8 @@ func (s *TransactionService) executeWithMerchantID(req *legacy.TransactionReques
 	}
 
 	var merchantID int
-	var newMerchantBalance int64
 	if merchant != nil {
-		newMerchantBalance = merchant.Balance + int64(req.Amount)
+		newMerchantBalance := merchant.Balance + int64(req.Amount)
 		if err := s.MerchantRepo.UpdateBalanceWithTx(tx, merchant.ID, newMerchantBalance); err != nil {
 			tx.Rollback()
 			return TransactionResult{Status: legacy.StatusFailed, Code: "95", Message: "failed to credit merchant account"}
@@ -414,35 +406,6 @@ func (s *TransactionService) executeWithMerchantID(req *legacy.TransactionReques
 		ReferenceNo:     req.ReferenceNo,
 	}
 	transactionID, err := s.Repo.SaveWithTx(tx, transaction)
-		return "FAILED"
-	}
-
-	// Update Cache setelah commit berhasil
-	s.Cache.Set(
-		cache.KeyUserBalance(userID),
-		strconv.Itoa(newBalance),
-		10*time.Minute,
-	)
-
-	// ---> ASYNC DECOUPLING: Broadcast standard payment event
-	if s.RabbitMQ != nil {
-		go messaging.PublishTransactionEvent(s.RabbitMQ, messaging.EventPayload{
-			TransactionID: fmt.Sprintf("TX-REG-%d-%d", userID, time.Now().Unix()),
-			UserID:        userID,
-			Amount:        amount,
-			Status:        result,
-			Timestamp:     time.Now().Format(time.RFC3339),
-		})
-	}
-
-	return result
-}
-
-// ProcessQRIS - pembayaran via QRIS
-func (s *TransactionService) ProcessQRIS(userID int, merchantCode string, amount int) string {
-
-	// READ: cek saldo user dari cache dulu
-	userBalance, err := s.getUserBalanceWithCache(userID)
 	if err != nil {
 		tx.Rollback()
 		return TransactionResult{Status: legacy.StatusFailed, Code: "94", Message: "failed to persist transaction"}
@@ -613,33 +576,6 @@ func (s *TransactionService) ReverseTransaction(transactionID int, referenceNo s
 
 	if err := tx.Commit(); err != nil {
 		tx.Rollback()
-		return "FAILED_COMMIT"
-	}
-
-	// Update Cache setelah commit berhasil
-	s.Cache.Set(
-		cache.KeyUserBalance(userID),
-		strconv.Itoa(newUserBalance),
-		10*time.Minute,
-	)
-	s.Cache.Set(
-		cache.KeyMerchantBalance(merchant.ID),
-		fmt.Sprintf("%d", newMerchantBalance),
-		10*time.Minute,
-	)
-
-	// ---> ASYNC DECOUPLING: Broadcast QRIS payment event
-	if s.RabbitMQ != nil {
-		go messaging.PublishTransactionEvent(s.RabbitMQ, messaging.EventPayload{
-			TransactionID: fmt.Sprintf("TX-QRIS-%d-%d", userID, time.Now().Unix()),
-			UserID:        userID,
-			MerchantCode:  merchantCode,
-			Amount:        amount,
-			Status:        result,
-			Timestamp:     time.Now().Format(time.RFC3339),
-		})
-	}
-
 		return TransactionResult{Status: legacy.StatusSystemBusy, Code: "91", Message: "failed to commit reversal", TransactionID: original.ID, ReferenceNo: req.ReferenceNo}
 	}
 

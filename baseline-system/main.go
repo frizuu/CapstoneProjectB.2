@@ -1,6 +1,7 @@
 package main
 
 import (
+	"baseline-system/cache"
 	"baseline-system/config"
 	"baseline-system/handler"
 	"baseline-system/messaging"
@@ -16,7 +17,12 @@ func main() {
 	db := config.ConnectDB()
 
 	// Koneksi Redis Cache
-	redisCache := cache.NewRedisCache()
+	redisAddr := os.Getenv("REDIS_URL")
+	if redisAddr == "" {
+		// Default to localhost if not running in docker, or "redis:6379" if using docker-compose networks
+		redisAddr = "localhost:6379"
+	}
+	redisCache := cache.NewRedisCache(redisAddr, "", 0)
 
 	// Koneksi RabbitMQ
 	amqpURL := os.Getenv("RABBITMQ_URL")
@@ -24,8 +30,12 @@ func main() {
 		amqpURL = "amqp://guest:guest@localhost:5672/"
 	}
 	rabbitConn, rabbitCh := messaging.ConnectRabbitMQ(amqpURL)
-	defer rabbitConn.Close()
-	defer rabbitCh.Close()
+	if rabbitConn != nil {
+		defer rabbitConn.Close()
+	}
+	if rabbitCh != nil {
+		defer rabbitCh.Close()
+	}
 
 	// Repository
 	repo := &repository.TransactionRepo{DB: db}
@@ -33,14 +43,10 @@ func main() {
 	merchantRepo := &repository.MerchantRepo{DB: db}
 	auditRepo := &repository.AuditRepo{DB: db}
 	ledgerRepo := &repository.LedgerRepo{DB: db}
+
 	if err := repo.EnsureSchema(); err != nil {
 		panic(err)
 	}
-
-
-	// Handler
-	userHandler := &handler.UserHandler{UserRepo: userRepo}
-	merchantHandler := &handler.MerchantHandler{MerchantRepo: merchantRepo}
 
 	// Service (sekarang menerima DB, Cache, dan RabbitMQ)
 	svc := &service.TransactionService{
@@ -50,10 +56,11 @@ func main() {
 		MerchantRepo: merchantRepo,
 		AuditRepo:    auditRepo,
 		LedgerRepo:   ledgerRepo,
+		Cache:        redisCache, // Passed the cache properly!
 		RabbitMQ:     rabbitCh,
 	}
 
-	// Handler
+	// Handler (Removed the broken early declarations)
 	userHandler := &handler.UserHandler{Service: svc}
 	merchantHandler := &handler.MerchantHandler{MerchantRepo: merchantRepo, Service: svc}
 	h := &handler.Handler{Service: svc}
@@ -69,8 +76,9 @@ func main() {
 	http.HandleFunc("/merchant/balance", merchantHandler.GetMerchantBalance)
 	http.HandleFunc("/merchants", merchantHandler.GetAllMerchants)
 	http.HandleFunc("/transactions", h.GetUserTransactions)
-	
+
 	http.HandleFunc("/transaction/status", h.GetTransactionStatus)
+
 	println("Server running on :8080")
 	http.ListenAndServe(":8080", nil)
 }
