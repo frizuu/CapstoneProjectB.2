@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"baseline-system/metrics"
 	"baseline-system/service"
 	"encoding/json"
 	"net/http"
@@ -30,6 +31,7 @@ func (h *UserHandler) GetBalance(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result := h.Service.BalanceInquiry(userID)
+	metrics.RecordBusinessOperation("BALANCE_INQUIRY", result.Status, result.Code, 0)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)

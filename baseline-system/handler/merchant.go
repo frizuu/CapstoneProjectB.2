@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"baseline-system/metrics"
 	"baseline-system/repository"
 	"baseline-system/service"
 	"encoding/json"
@@ -22,10 +23,12 @@ func (h *MerchantHandler) InquiryQRIS(w http.ResponseWriter, r *http.Request) {
 
 	merchant, err := h.MerchantRepo.GetByCode(merchantCode)
 	if err != nil {
+		metrics.RecordBusinessOperation("QRIS_INQUIRY", "FAILED", "15", 0)
 		http.Error(w, "Merchant not found", http.StatusNotFound)
 		return
 	}
 
+	metrics.RecordBusinessOperation("QRIS_INQUIRY", "SUCCESS", "00", 0)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":        "SUCCESS",
@@ -45,6 +48,7 @@ func (h *MerchantHandler) GetMerchantBalance(w http.ResponseWriter, r *http.Requ
 	}
 
 	result := h.Service.MerchantBalanceInquiry(merchantID)
+	metrics.RecordBusinessOperation("MERCHANT_BALANCE_INQUIRY", result.Status, result.Code, 0)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
@@ -53,10 +57,12 @@ func (h *MerchantHandler) GetMerchantBalance(w http.ResponseWriter, r *http.Requ
 func (h *MerchantHandler) GetAllMerchants(w http.ResponseWriter, r *http.Request) {
 	merchants, err := h.MerchantRepo.GetAll()
 	if err != nil {
+		metrics.RecordBusinessOperation("MERCHANT_LIST", "FAILED", "96", 0)
 		http.Error(w, "Failed to fetch merchants", http.StatusInternalServerError)
 		return
 	}
 
+	metrics.RecordBusinessOperation("MERCHANT_LIST", "SUCCESS", "00", 0)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":    "SUCCESS",

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"baseline-system/metrics"
 	"baseline-system/service"
 	"encoding/json"
 	"net/http"
@@ -76,10 +77,13 @@ func (h *Handler) Payment(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case req.RecipientUserID != 0:
 		result = h.Service.ProcessTransfer(req.UserID, req.RecipientUserID, req.Amount, req.ReferenceNo)
+		metrics.RecordBusinessOperation("TRANSFER", result.Status, result.Code, req.Amount)
 	case req.MerchantID != 0 || req.MerchantCode != "":
 		result = h.Service.ProcessToMerchant(req.UserID, req.MerchantID, req.MerchantCode, req.Amount, req.ReferenceNo)
+		metrics.RecordBusinessOperation("MERCHANT_PAYMENT", result.Status, result.Code, req.Amount)
 	default:
 		result = h.Service.Process(req.UserID, req.Amount, req.ReferenceNo)
+		metrics.RecordBusinessOperation("PAYMENT", result.Status, result.Code, req.Amount)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -100,6 +104,7 @@ func (h *Handler) PaymentQRIS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result := h.Service.ProcessQRIS(req.UserID, req.MerchantCode, req.Amount, req.ReferenceNo)
+	metrics.RecordBusinessOperation("QRIS_PAYMENT", result.Status, result.Code, req.Amount)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
@@ -118,6 +123,7 @@ func (h *Handler) ReverseTransaction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result := h.Service.ReverseTransaction(req.TransactionID, req.ReferenceNo)
+	metrics.RecordBusinessOperation("REVERSAL", result.Status, result.Code, 0)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
@@ -137,6 +143,7 @@ func (h *Handler) GetUserTransactions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result := h.Service.GetUserTransactionHistory(userID)
+	metrics.RecordBusinessOperation("TRANSACTION_HISTORY", result.Status, result.Code, 0)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
@@ -161,6 +168,7 @@ func (h *Handler) GetTransactionStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result := h.Service.GetTransactionStatus(transactionID)
+	metrics.RecordBusinessOperation("TRANSACTION_STATUS", result.Status, result.Code, 0)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
