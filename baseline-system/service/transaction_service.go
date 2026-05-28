@@ -3,6 +3,7 @@ package service
 import (
 	"baseline-system/cache"
 	"baseline-system/legacy"
+	"baseline-system/messaging"
 	"baseline-system/model"
 	"baseline-system/repository"
 	"database/sql"
@@ -17,10 +18,10 @@ type TransactionService struct {
 	Repo         *repository.TransactionRepo
 	UserRepo     *repository.UserRepo
 	MerchantRepo *repository.MerchantRepo
-	AuditRepo    *repository.AuditRepo  // Moved back to struct
-	LedgerRepo   *repository.LedgerRepo // Moved back to struct
+	AuditRepo    *repository.AuditRepo
+	LedgerRepo   *repository.LedgerRepo
 	Cache        *cache.RedisCache
-	RabbitMQ     *amqp.Channel // Injected RabbitMQ Channel
+	RabbitMQ     *amqp.Channel
 }
 
 type TransactionResult struct {
@@ -122,7 +123,7 @@ func (s *TransactionService) MerchantInquiry(merchantCode string) MerchantInquir
 	if status != legacy.StatusSuccess {
 		result.Code = "96"
 		result.Message = "legacy core returned " + status
-		result.AuditID = s.recordInquiryAudit(req.Type, 0, result.Status, result.Message, fmt.Sprintf("merchant_code=%s ref=%s profile=%s", merchantCode, req.ReferenceNo, profile))
+		s.recordInquiryAudit(req.Type, 0, result.Status, result.Message, fmt.Sprintf("merchant_code=%s ref=%s profile=%s", merchantCode, req.ReferenceNo, profile))
 		return result
 	}
 
@@ -131,7 +132,7 @@ func (s *TransactionService) MerchantInquiry(merchantCode string) MerchantInquir
 		result.Status = legacy.StatusInvalidInput
 		result.Code = "15"
 		result.Message = "merchant not found or inactive"
-		result.AuditID = s.recordInquiryAudit(req.Type, 0, result.Status, result.Message, fmt.Sprintf("merchant_code=%s ref=%s profile=%s", merchantCode, req.ReferenceNo, profile))
+		s.recordInquiryAudit(req.Type, 0, result.Status, result.Message, fmt.Sprintf("merchant_code=%s ref=%s profile=%s", merchantCode, req.ReferenceNo, profile))
 		return result
 	}
 
@@ -140,7 +141,7 @@ func (s *TransactionService) MerchantInquiry(merchantCode string) MerchantInquir
 	result.MerchantCode = merchant.MerchantCode
 	result.Category = merchant.Category
 	result.LegacyLatency = time.Since(start).Milliseconds()
-	result.AuditID = s.recordInquiryAudit(req.Type, merchant.ID, result.Status, result.Message, fmt.Sprintf("merchant_code=%s ref=%s profile=%s", merchantCode, req.ReferenceNo, profile))
+	s.recordInquiryAudit(req.Type, merchant.ID, result.Status, result.Message, fmt.Sprintf("merchant_code=%s ref=%s profile=%s", merchantCode, req.ReferenceNo, profile))
 	return result
 }
 
@@ -156,22 +157,13 @@ func (s *TransactionService) BalanceInquiry(userID int) BalanceInquiryResult {
 	}
 	result := legacy.ExecuteBalanceInquiry(req, user)
 
-	audit := &model.AuditEntry{
-		EventType:    "INQUIRY",
-		EventSubType: legacy.TypeBalance,
-		ReferenceID:  userID,
-		Status:       result.Status,
-		Message:      result.Message,
-		Payload:      fmt.Sprintf("user=%d ref=%s profile=%s latency_ms=%d", userID, req.ReferenceNo, result.Profile, result.LatencyMs),
-	}
-	auditID, _ := s.AuditRepo.RecordNoTx(audit)
+	s.recordInquiryAudit(legacy.TypeBalance, userID, result.Status, result.Message, fmt.Sprintf("user=%d ref=%s profile=%s latency_ms=%d", userID, req.ReferenceNo, result.Profile, result.LatencyMs))
 
 	response := BalanceInquiryResult{
 		Status:        result.Status,
 		Code:          result.Code,
 		Message:       result.Message,
 		UserID:        userID,
-		AuditID:       auditID,
 		LegacyProfile: result.Profile,
 		LegacyLatency: result.LatencyMs,
 	}
@@ -194,15 +186,7 @@ func (s *TransactionService) MerchantBalanceInquiry(merchantID int) MerchantBala
 	}
 	result := legacy.ExecuteMerchantBalanceInquiry(req, merchant)
 
-	audit := &model.AuditEntry{
-		EventType:    "INQUIRY",
-		EventSubType: legacy.TypeMerchantBalance,
-		ReferenceID:  merchant.ID,
-		Status:       result.Status,
-		Message:      result.Message,
-		Payload:      fmt.Sprintf("merchant=%d merchant_code=%s ref=%s profile=%s latency_ms=%d", merchant.ID, merchant.MerchantCode, req.ReferenceNo, result.Profile, result.LatencyMs),
-	}
-	auditID, _ := s.AuditRepo.RecordNoTx(audit)
+	s.recordInquiryAudit(legacy.TypeMerchantBalance, merchant.ID, result.Status, result.Message, fmt.Sprintf("merchant=%d merchant_code=%s ref=%s profile=%s latency_ms=%d", merchant.ID, merchant.MerchantCode, req.ReferenceNo, result.Profile, result.LatencyMs))
 
 	response := MerchantBalanceInquiryResult{
 		Status:        result.Status,
@@ -210,7 +194,6 @@ func (s *TransactionService) MerchantBalanceInquiry(merchantID int) MerchantBala
 		Message:       result.Message,
 		MerchantID:    merchant.ID,
 		MerchantCode:  merchant.MerchantCode,
-		AuditID:       auditID,
 		LegacyProfile: result.Profile,
 		LegacyLatency: result.LatencyMs,
 	}
@@ -259,6 +242,16 @@ func (s *TransactionService) execute(req *legacy.TransactionRequest) Transaction
 }
 
 func (s *TransactionService) executeWithMerchantID(req *legacy.TransactionRequest, merchantIDInput int) TransactionResult {
+	// ---> NEW: Strict Validation Guard <---
+	// This prevents the system from locking up or throwing SQL errors if the frontend forgets the reference_no
+	if req.ReferenceNo == "" {
+		return TransactionResult{
+			Status:  legacy.StatusInvalidInput,
+			Code:    "30",
+			Message: "reference_no is required and cannot be empty",
+		}
+	}
+
 	legacy.PrepareInquiryRequest(req)
 
 	tx, err := s.DB.Begin()
@@ -317,18 +310,15 @@ func (s *TransactionService) executeWithMerchantID(req *legacy.TransactionReques
 
 	result := legacy.ExecuteTransaction(req, user, merchant)
 
-	audit := &model.AuditEntry{
+	// ---> ASYNC DECOUPLING: PREPARE AUDIT (Do NOT save to DB here)
+	auditPayload := messaging.AuditPayload{
 		EventType:    "TRANSACTION",
 		EventSubType: string(req.Type),
 		ReferenceID:  req.UserID,
 		Status:       result.Status,
 		Message:      result.Message,
 		Payload:      fmt.Sprintf("user=%d recipient_user=%d amount=%d merchant=%s ref=%s profile=%s latency_ms=%d need_reversal=%t", req.UserID, req.RecipientUserID, req.Amount, req.MerchantCode, req.ReferenceNo, result.Profile, result.LatencyMs, result.NeedReversal),
-	}
-	auditID, auditErr := s.AuditRepo.Record(tx, audit)
-	if auditErr != nil {
-		tx.Rollback()
-		return TransactionResult{Status: legacy.StatusSystemBusy, Code: "96", Message: "failed to log audit"}
+		CreatedAt:    time.Now().Format(time.RFC3339),
 	}
 
 	if result.Status != legacy.StatusSuccess {
@@ -354,13 +344,18 @@ func (s *TransactionService) executeWithMerchantID(req *legacy.TransactionReques
 			tx.Rollback()
 			return TransactionResult{Status: legacy.StatusSystemBusy, Code: "91", Message: "failed to complete failed transaction path"}
 		}
+
+		// Fire Async Audit for failed transaction
+		if s.RabbitMQ != nil {
+			go messaging.PublishAuditEvent(s.RabbitMQ, auditPayload)
+		}
+
 		return TransactionResult{
 			Status:        result.Status,
 			Code:          result.Code,
 			Message:       result.Message,
 			TransactionID: transactionID,
 			ReferenceNo:   req.ReferenceNo,
-			AuditID:       auditID,
 			NeedReversal:  result.NeedReversal,
 			LegacyProfile: result.Profile,
 			LegacyLatency: result.LatencyMs,
@@ -431,13 +426,30 @@ func (s *TransactionService) executeWithMerchantID(req *legacy.TransactionReques
 		return TransactionResult{Status: legacy.StatusSystemBusy, Code: "91", Message: "failed to commit transaction"}
 	}
 
+	// ---> ASYNC DECOUPLING: Broadcast Audit Event
+	if s.RabbitMQ != nil {
+		go messaging.PublishAuditEvent(s.RabbitMQ, auditPayload)
+	}
+
+	// ---> ASYNC DECOUPLING: Broadcast Standard Transaction Event to UI/Analytics
+	if s.RabbitMQ != nil {
+		eventPayload := messaging.EventPayload{
+			TransactionID: fmt.Sprintf("%d", transactionID),
+			UserID:        req.UserID,
+			MerchantCode:  req.MerchantCode,
+			Amount:        req.Amount,
+			Status:        result.Status,
+			Timestamp:     time.Now().Format(time.RFC3339),
+		}
+		go messaging.PublishTransactionEvent(s.RabbitMQ, eventPayload)
+	}
+
 	return TransactionResult{
 		Status:        result.Status,
 		Code:          result.Code,
 		Message:       result.Message,
 		TransactionID: transactionID,
 		ReferenceNo:   req.ReferenceNo,
-		AuditID:       auditID,
 		NeedReversal:  result.NeedReversal,
 		LegacyProfile: result.Profile,
 		LegacyLatency: result.LatencyMs,
@@ -449,6 +461,15 @@ func (s *TransactionService) GetUserTransactions(userID int) ([]map[string]inter
 }
 
 func (s *TransactionService) ReverseTransaction(transactionID int, referenceNo string) TransactionResult {
+	// ---> NEW: Strict Validation Guard <---
+	if referenceNo == "" {
+		return TransactionResult{
+			Status:  legacy.StatusInvalidInput,
+			Code:    "30",
+			Message: "reference_no is required and cannot be empty",
+		}
+	}
+
 	req := &legacy.TransactionRequest{
 		Type:        legacy.TypeReversal,
 		ReferenceNo: referenceNo,
@@ -572,12 +593,13 @@ func (s *TransactionService) ReverseTransaction(transactionID int, referenceNo s
 		return TransactionResult{Status: legacy.StatusFailed, Code: "94", Message: "failed to update original transaction", TransactionID: original.ID, ReferenceNo: req.ReferenceNo}
 	}
 
-	auditID := s.recordInquiryAudit(legacy.TypeReversal, original.ID, legacy.StatusSuccess, "Transaction reversed", fmt.Sprintf("transaction_id=%d reversal_transaction_id=%d ref=%s moved_funds=%t", original.ID, reversalID, req.ReferenceNo, shouldMoveFunds))
-
 	if err := tx.Commit(); err != nil {
 		tx.Rollback()
 		return TransactionResult{Status: legacy.StatusSystemBusy, Code: "91", Message: "failed to commit reversal", TransactionID: original.ID, ReferenceNo: req.ReferenceNo}
 	}
+
+	// ---> ASYNC DECOUPLING: Fire reversal audit
+	s.recordInquiryAudit(legacy.TypeReversal, original.ID, legacy.StatusSuccess, "Transaction reversed", fmt.Sprintf("transaction_id=%d reversal_transaction_id=%d ref=%s moved_funds=%t", original.ID, reversalID, req.ReferenceNo, shouldMoveFunds))
 
 	return TransactionResult{
 		Status:        legacy.StatusSuccess,
@@ -585,7 +607,6 @@ func (s *TransactionService) ReverseTransaction(transactionID int, referenceNo s
 		Message:       "Transaction reversed",
 		TransactionID: reversalID,
 		ReferenceNo:   req.ReferenceNo,
-		AuditID:       auditID,
 	}
 }
 
@@ -609,7 +630,7 @@ func (s *TransactionService) GetUserTransactionHistory(userID int) TransactionHi
 	if status != legacy.StatusSuccess {
 		result.Code = "96"
 		result.Message = "legacy core returned " + status
-		result.AuditID = s.recordInquiryAudit(req.Type, userID, result.Status, result.Message, fmt.Sprintf("user=%d ref=%s profile=%s", userID, req.ReferenceNo, profile))
+		s.recordInquiryAudit(req.Type, userID, result.Status, result.Message, fmt.Sprintf("user=%d ref=%s profile=%s", userID, req.ReferenceNo, profile))
 		return result
 	}
 
@@ -617,7 +638,7 @@ func (s *TransactionService) GetUserTransactionHistory(userID int) TransactionHi
 		result.Status = legacy.StatusInvalidInput
 		result.Code = "14"
 		result.Message = "user not found"
-		result.AuditID = s.recordInquiryAudit(req.Type, userID, result.Status, result.Message, fmt.Sprintf("user=%d ref=%s profile=%s", userID, req.ReferenceNo, profile))
+		s.recordInquiryAudit(req.Type, userID, result.Status, result.Message, fmt.Sprintf("user=%d ref=%s profile=%s", userID, req.ReferenceNo, profile))
 		return result
 	}
 
@@ -626,13 +647,13 @@ func (s *TransactionService) GetUserTransactionHistory(userID int) TransactionHi
 		result.Status = legacy.StatusSystemBusy
 		result.Code = "96"
 		result.Message = "failed to fetch transaction history"
-		result.AuditID = s.recordInquiryAudit(req.Type, userID, result.Status, result.Message, fmt.Sprintf("user=%d ref=%s profile=%s", userID, req.ReferenceNo, profile))
+		s.recordInquiryAudit(req.Type, userID, result.Status, result.Message, fmt.Sprintf("user=%d ref=%s profile=%s", userID, req.ReferenceNo, profile))
 		return result
 	}
 
 	result.Transactions = transactions
 	result.LegacyLatency = time.Since(start).Milliseconds()
-	result.AuditID = s.recordInquiryAudit(req.Type, userID, result.Status, result.Message, fmt.Sprintf("user=%d ref=%s profile=%s count=%d", userID, req.ReferenceNo, profile, len(transactions)))
+	s.recordInquiryAudit(req.Type, userID, result.Status, result.Message, fmt.Sprintf("user=%d ref=%s profile=%s count=%d", userID, req.ReferenceNo, profile, len(transactions)))
 	return result
 }
 
@@ -655,7 +676,7 @@ func (s *TransactionService) GetTransactionStatus(transactionID int) Transaction
 	if status != legacy.StatusSuccess {
 		result.Code = "96"
 		result.Message = "legacy core returned " + status
-		result.AuditID = s.recordInquiryAudit(req.Type, transactionID, status, result.Message, fmt.Sprintf("transaction_id=%d ref=%s profile=%s", transactionID, req.ReferenceNo, profile))
+		s.recordInquiryAudit(req.Type, transactionID, status, result.Message, fmt.Sprintf("transaction_id=%d ref=%s profile=%s", transactionID, req.ReferenceNo, profile))
 		return result
 	}
 
@@ -671,27 +692,30 @@ func (s *TransactionService) GetTransactionStatus(transactionID int) Transaction
 			result.Message = "failed to fetch transaction status"
 		}
 		result.LegacyLatency = time.Since(start).Milliseconds()
-		result.AuditID = s.recordInquiryAudit(req.Type, transactionID, result.Status, result.Message, fmt.Sprintf("transaction_id=%d ref=%s profile=%s", transactionID, req.ReferenceNo, profile))
+		s.recordInquiryAudit(req.Type, transactionID, result.Status, result.Message, fmt.Sprintf("transaction_id=%d ref=%s profile=%s", transactionID, req.ReferenceNo, profile))
 		return result
 	}
 
 	result.Data = data
 	result.LegacyLatency = time.Since(start).Milliseconds()
-	result.AuditID = s.recordInquiryAudit(req.Type, transactionID, result.Status, result.Message, fmt.Sprintf("transaction_id=%d ref=%s profile=%s", transactionID, req.ReferenceNo, profile))
+	s.recordInquiryAudit(req.Type, transactionID, result.Status, result.Message, fmt.Sprintf("transaction_id=%d ref=%s profile=%s", transactionID, req.ReferenceNo, profile))
 	return result
 }
 
-func (s *TransactionService) recordInquiryAudit(eventSubType string, referenceID int, status string, message string, payload string) int {
-	audit := &model.AuditEntry{
-		EventType:    "INQUIRY",
-		EventSubType: eventSubType,
-		ReferenceID:  referenceID,
-		Status:       status,
-		Message:      message,
-		Payload:      payload,
+// ---> ASYNC DECOUPLING: recordInquiryAudit now fires a RabbitMQ message instead of saving to the DB!
+func (s *TransactionService) recordInquiryAudit(eventSubType string, referenceID int, status string, message string, payload string) {
+	if s.RabbitMQ != nil {
+		auditPayload := messaging.AuditPayload{
+			EventType:    "INQUIRY",
+			EventSubType: eventSubType,
+			ReferenceID:  referenceID,
+			Status:       status,
+			Message:      message,
+			Payload:      payload,
+			CreatedAt:    time.Now().Format(time.RFC3339),
+		}
+		go messaging.PublishAuditEvent(s.RabbitMQ, auditPayload)
 	}
-	auditID, _ := s.AuditRepo.RecordNoTx(audit)
-	return auditID
 }
 
 func (s *TransactionService) transactionToResult(t *model.Transaction, idempotent bool) TransactionResult {

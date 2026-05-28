@@ -7,6 +7,8 @@ import (
 	"baseline-system/messaging"
 	"baseline-system/repository"
 	"baseline-system/service"
+	"baseline-system/worker" // Imported the worker package!
+	"log"
 	"net/http"
 	"os"
 )
@@ -56,14 +58,24 @@ func main() {
 		MerchantRepo: merchantRepo,
 		AuditRepo:    auditRepo,
 		LedgerRepo:   ledgerRepo,
-		Cache:        redisCache, // Passed the cache properly!
+		Cache:        redisCache,
 		RabbitMQ:     rabbitCh,
 	}
 
-	// Handler (Removed the broken early declarations)
+	// Handler
 	userHandler := &handler.UserHandler{Service: svc}
 	merchantHandler := &handler.MerchantHandler{MerchantRepo: merchantRepo, Service: svc}
 	h := &handler.Handler{Service: svc}
+
+	// =========================================================
+	// STEP 4: START BACKGROUND WORKERS
+	// =========================================================
+	if rabbitCh != nil {
+		log.Println("Starting background Audit Worker...")
+		// This runs silently in the background, listening to RabbitMQ
+		// and saving audit logs to the database without slowing down the API.
+		worker.StartAuditWorker(rabbitCh, auditRepo)
+	}
 
 	// Routes - existing
 	http.HandleFunc("/payment", h.Payment)
@@ -76,9 +88,10 @@ func main() {
 	http.HandleFunc("/merchant/balance", merchantHandler.GetMerchantBalance)
 	http.HandleFunc("/merchants", merchantHandler.GetAllMerchants)
 	http.HandleFunc("/transactions", h.GetUserTransactions)
-
 	http.HandleFunc("/transaction/status", h.GetTransactionStatus)
 
-	println("Server running on :8080")
-	http.ListenAndServe(":8080", nil)
+	log.Println("Server running on :8080")
+	if err := http.ListenAndServe(":8080", nil); err != nil {
+		log.Fatalf("Server failed to start: %v", err)
+	}
 }
