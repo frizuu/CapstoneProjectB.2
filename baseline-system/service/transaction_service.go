@@ -5,6 +5,7 @@ import (
 	"baseline-system/model"
 	"baseline-system/repository"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -88,6 +89,31 @@ type TransactionStatusResult struct {
 	LegacyLatency int64                  `json:"legacy_latency_ms,omitempty"`
 }
 
+type balanceCacheItem struct {
+	Balance int `json:"balance"`
+}
+
+// merchantBalanceCacheItem digunakan untuk menyimpan saldo merchant di cache
+type merchantBalanceCacheItem struct {
+	Balance int64 `json:"balance"`
+}
+
+// merchantInfoCacheItem digunakan untuk menyimpan data merchant di cache
+type merchantInfoCacheItem struct {
+	MerchantID   int    `json:"merchant_id"`
+	MerchantName string `json:"merchant_name"`
+	MerchantCode string `json:"merchant_code"`
+	Category     string `json:"category"`
+}
+
+// txStatusCacheItem digunakan untuk menyimpan status transaksi di cache
+type txStatusCacheItem struct {
+	Data map[string]interface{} `json:"data"`
+}
+
+// TTL khusus: status transaksi lebih pendek karena bisa berubah (misal PENDING → SUCCESS)
+const txStatusCacheTTL = 30 * time.Second
+
 func (s *TransactionService) Process(userID int, amount int, referenceNo string) TransactionResult {
 	req := &legacy.TransactionRequest{
 		Type:        legacy.TypePayment,
@@ -99,6 +125,25 @@ func (s *TransactionService) Process(userID int, amount int, referenceNo string)
 }
 
 func (s *TransactionService) MerchantInquiry(merchantCode string) MerchantInquiryResult {
+	// --- Cache L1/Redis: cek merchant info sebelum ke DB & legacy ---
+	cacheKey := fmt.Sprintf("merchant_info:%s", merchantCode)
+	if cached, ok := GetFromCache(cacheKey); ok {
+		var item merchantInfoCacheItem
+		if err := json.Unmarshal([]byte(cached), &item); err == nil {
+			return MerchantInquiryResult{
+				Status:        legacy.StatusSuccess,
+				Code:          "00",
+				Message:       "Merchant inquiry retrieved from cache",
+				MerchantID:    item.MerchantID,
+				MerchantName:  item.MerchantName,
+				MerchantCode:  item.MerchantCode,
+				Category:      item.Category,
+				LegacyProfile: "cache",
+				LegacyLatency: 0,
+			}
+		}
+	}
+
 	start := time.Now()
 	req := &legacy.TransactionRequest{
 		Type:         legacy.TypeMerchant,
@@ -136,10 +181,38 @@ func (s *TransactionService) MerchantInquiry(merchantCode string) MerchantInquir
 	result.Category = merchant.Category
 	result.LegacyLatency = time.Since(start).Milliseconds()
 	result.AuditID = s.recordInquiryAudit(req.Type, merchant.ID, result.Status, result.Message, fmt.Sprintf("merchant_code=%s ref=%s profile=%s", merchantCode, req.ReferenceNo, profile))
+
+	// Simpan ke cache setelah berhasil mendapat data merchant
+	cacheItem := merchantInfoCacheItem{
+		MerchantID:   merchant.ID,
+		MerchantName: merchant.Name,
+		MerchantCode: merchant.MerchantCode,
+		Category:     merchant.Category,
+	}
+	if data, err := json.Marshal(cacheItem); err == nil {
+		SetCache(cacheKey, string(data), defaultCacheTTL)
+	}
+
 	return result
 }
 
 func (s *TransactionService) BalanceInquiry(userID int) BalanceInquiryResult {
+	key := fmt.Sprintf("balance:%d", userID)
+	if cached, ok := GetFromCache(key); ok {
+		var item balanceCacheItem
+		if err := json.Unmarshal([]byte(cached), &item); err == nil {
+			return BalanceInquiryResult{
+				Status:        legacy.StatusSuccess,
+				Code:          "00",
+				Message:       "Balance retrieved from cache",
+				UserID:        userID,
+				Balance:       item.Balance,
+				LegacyProfile: "cache",
+				LegacyLatency: 0,
+			}
+		}
+	}
+
 	user, err := s.UserRepo.GetByID(userID)
 	if err != nil {
 		return BalanceInquiryResult{Status: legacy.StatusInvalidInput, Code: "14", Message: "user not found"}
@@ -172,12 +245,33 @@ func (s *TransactionService) BalanceInquiry(userID int) BalanceInquiryResult {
 	}
 	if result.Status == legacy.StatusSuccess {
 		response.Balance = result.Balance
+		cacheItem := balanceCacheItem{Balance: result.Balance}
+		if data, err := json.Marshal(cacheItem); err == nil {
+			SetCache(key, string(data), defaultCacheTTL)
+		}
 	}
 
 	return response
 }
 
 func (s *TransactionService) MerchantBalanceInquiry(merchantID int) MerchantBalanceInquiryResult {
+	// --- Cache L1/Redis: cek saldo merchant sebelum ke DB & legacy ---
+	cacheKey := fmt.Sprintf("merchant_balance:%d", merchantID)
+	if cached, ok := GetFromCache(cacheKey); ok {
+		var item merchantBalanceCacheItem
+		if err := json.Unmarshal([]byte(cached), &item); err == nil {
+			return MerchantBalanceInquiryResult{
+				Status:        legacy.StatusSuccess,
+				Code:          "00",
+				Message:       "Merchant balance retrieved from cache",
+				MerchantID:    merchantID,
+				Balance:       item.Balance,
+				LegacyProfile: "cache",
+				LegacyLatency: 0,
+			}
+		}
+	}
+
 	merchant, err := s.MerchantRepo.GetByID(merchantID)
 	if err != nil {
 		return MerchantBalanceInquiryResult{Status: legacy.StatusInvalidInput, Code: "15", Message: "merchant not found"}
@@ -211,6 +305,11 @@ func (s *TransactionService) MerchantBalanceInquiry(merchantID int) MerchantBala
 	}
 	if result.Status == legacy.StatusSuccess {
 		response.Balance = result.Balance
+		// Simpan ke cache setelah berhasil mendapat saldo merchant
+		cacheItem := merchantBalanceCacheItem{Balance: result.Balance}
+		if data, err := json.Marshal(cacheItem); err == nil {
+			SetCache(cacheKey, string(data), defaultCacheTTL)
+		}
 	}
 
 	return response
@@ -256,9 +355,50 @@ func (s *TransactionService) execute(req *legacy.TransactionRequest) Transaction
 func (s *TransactionService) executeWithMerchantID(req *legacy.TransactionRequest, merchantIDInput int) TransactionResult {
 	legacy.PrepareInquiryRequest(req)
 
+	// 1. Ambil data user secara read-only (tanpa lock) untuk keperluan inquiry/validasi legacy
+	user, err := s.UserRepo.GetByID(req.UserID)
+	if err != nil {
+		return TransactionResult{Status: legacy.StatusInvalidInput, Code: "14", Message: "user not found"}
+	}
+
+	// 2. Ambil data merchant secara read-only (tanpa lock)
+	var merchant *model.Merchant
+	if req.Type == legacy.TypeQRIS || req.MerchantCode != "" {
+		merchant, err = s.MerchantRepo.GetByCode(req.MerchantCode)
+		if err != nil {
+			return TransactionResult{Status: legacy.StatusInvalidInput, Code: "15", Message: "merchant not found or inactive"}
+		}
+	} else if merchantIDInput > 0 {
+		merchant, err = s.MerchantRepo.GetByID(merchantIDInput)
+		if err != nil {
+			return TransactionResult{Status: legacy.StatusInvalidInput, Code: "15", Message: "merchant not found or inactive"}
+		}
+		req.MerchantCode = merchant.MerchantCode
+	}
+
+	// 3. Ambil data recipient secara read-only (tanpa lock) jika tipe transfer
+	var recipient *model.User
+	if req.Type == legacy.TypeTransfer {
+		if req.RecipientUserID == 0 {
+			return TransactionResult{Status: legacy.StatusInvalidInput, Code: "14", Message: "recipient_user_id is required"}
+		}
+		if req.RecipientUserID == req.UserID {
+			return TransactionResult{Status: legacy.StatusInvalidInput, Code: "12", Message: "sender and recipient cannot be the same user"}
+		}
+		recipient, err = s.UserRepo.GetByID(req.RecipientUserID)
+		if err != nil {
+			return TransactionResult{Status: legacy.StatusInvalidInput, Code: "14", Message: "recipient user not found"}
+		}
+	}
+
+	// 4. Panggil Legacy Monolithic Host (yang lambat & blocking, tidur 1.2-1.5 detik)
+	//    Pemanggilan dilakukan di LUAR transaksi database agar tidak menahan lock baris!
+	result := legacy.ExecuteTransaction(req, user, merchant)
+
+	// 5. Setelah respon dari host legacy didapat, buka transaksi database yang super singkat
 	tx, err := s.DB.Begin()
 	if err != nil {
-		return TransactionResult{Status: legacy.StatusSystemBusy, Code: "91", Message: "unable to start transaction"}
+		return TransactionResult{Status: legacy.StatusSystemBusy, Code: "91", Message: "unable to start database transaction"}
 	}
 	defer func() {
 		if err != nil {
@@ -266,6 +406,7 @@ func (s *TransactionService) executeWithMerchantID(req *legacy.TransactionReques
 		}
 	}()
 
+	// Cek duplikasi/idempotency di dalam transaksi DB
 	if existing, err := s.Repo.GetByReferenceNoWithTx(tx, req.ReferenceNo); err == nil {
 		if commitErr := tx.Commit(); commitErr != nil {
 			tx.Rollback()
@@ -277,41 +418,7 @@ func (s *TransactionService) executeWithMerchantID(req *legacy.TransactionReques
 		return TransactionResult{Status: legacy.StatusSystemBusy, Code: "96", Message: "failed to check transaction reference"}
 	}
 
-	user, err := s.UserRepo.GetForUpdate(tx, req.UserID)
-	if err != nil {
-		return TransactionResult{Status: legacy.StatusInvalidInput, Code: "14", Message: "user not found"}
-	}
-
-	var merchant *model.Merchant
-	if req.Type == legacy.TypeQRIS || req.MerchantCode != "" {
-		merchant, err = s.MerchantRepo.GetByCodeForUpdate(tx, req.MerchantCode)
-		if err != nil {
-			return TransactionResult{Status: legacy.StatusInvalidInput, Code: "15", Message: "merchant not found or inactive"}
-		}
-	} else if merchantIDInput > 0 {
-		merchant, err = s.MerchantRepo.GetByIDForUpdate(tx, merchantIDInput)
-		if err != nil {
-			return TransactionResult{Status: legacy.StatusInvalidInput, Code: "15", Message: "merchant not found or inactive"}
-		}
-		req.MerchantCode = merchant.MerchantCode
-	}
-
-	var recipient *model.User
-	if req.Type == legacy.TypeTransfer {
-		if req.RecipientUserID == 0 {
-			return TransactionResult{Status: legacy.StatusInvalidInput, Code: "14", Message: "recipient_user_id is required"}
-		}
-		if req.RecipientUserID == req.UserID {
-			return TransactionResult{Status: legacy.StatusInvalidInput, Code: "12", Message: "sender and recipient cannot be the same user"}
-		}
-		recipient, err = s.UserRepo.GetForUpdate(tx, req.RecipientUserID)
-		if err != nil {
-			return TransactionResult{Status: legacy.StatusInvalidInput, Code: "14", Message: "recipient user not found"}
-		}
-	}
-
-	result := legacy.ExecuteTransaction(req, user, merchant)
-
+	// Catat audit entry
 	audit := &model.AuditEntry{
 		EventType:    "TRANSACTION",
 		EventSubType: string(req.Type),
@@ -362,6 +469,19 @@ func (s *TransactionService) executeWithMerchantID(req *legacy.TransactionReques
 		}
 	}
 
+	// 6. Kunci baris user sekarang karena kita siap melakukan pendebitan saldo
+	userForUpdate, err := s.UserRepo.GetForUpdate(tx, user.ID)
+	if err != nil {
+		tx.Rollback()
+		return TransactionResult{Status: legacy.StatusInvalidInput, Code: "14", Message: "user not found"}
+	}
+
+	// Verifikasi saldo sekali lagi (apakah berubah saat kita menunggu panggilan legacy selesai?)
+	if userForUpdate.Balance < req.Amount {
+		tx.Rollback()
+		return TransactionResult{Status: legacy.StatusFailed, Code: "51", Message: "insufficient funds", ReferenceNo: req.ReferenceNo}
+	}
+
 	debited, err := s.UserRepo.DebitBalanceWithTx(tx, user.ID, req.Amount)
 	if err != nil {
 		tx.Rollback()
@@ -373,9 +493,14 @@ func (s *TransactionService) executeWithMerchantID(req *legacy.TransactionReques
 	}
 
 	var merchantID int
-	var newMerchantBalance int64
 	if merchant != nil {
-		newMerchantBalance = merchant.Balance + int64(req.Amount)
+		// Kunci baris merchant untuk mengupdate saldo
+		merchantForUpdate, err := s.MerchantRepo.GetByIDForUpdate(tx, merchant.ID)
+		if err != nil {
+			tx.Rollback()
+			return TransactionResult{Status: legacy.StatusFailed, Code: "95", Message: "failed to lock merchant for balance update"}
+		}
+		newMerchantBalance := merchantForUpdate.Balance + int64(req.Amount)
 		if err := s.MerchantRepo.UpdateBalanceWithTx(tx, merchant.ID, newMerchantBalance); err != nil {
 			tx.Rollback()
 			return TransactionResult{Status: legacy.StatusFailed, Code: "95", Message: "failed to credit merchant account"}
@@ -383,19 +508,23 @@ func (s *TransactionService) executeWithMerchantID(req *legacy.TransactionReques
 		merchantID = merchant.ID
 	}
 
-	var recipientUserID int
 	if recipient != nil {
+		// Kunci baris recipient untuk mengupdate saldo
+		_, err := s.UserRepo.GetForUpdate(tx, recipient.ID)
+		if err != nil {
+			tx.Rollback()
+			return TransactionResult{Status: legacy.StatusFailed, Code: "95", Message: "failed to lock recipient user for balance update"}
+		}
 		if err := s.UserRepo.CreditBalanceWithTx(tx, recipient.ID, req.Amount); err != nil {
 			tx.Rollback()
 			return TransactionResult{Status: legacy.StatusFailed, Code: "95", Message: "failed to credit recipient user account"}
 		}
-		recipientUserID = recipient.ID
 	}
 
 	transaction := &model.Transaction{
 		UserID:          user.ID,
 		MerchantID:      merchantID,
-		RecipientUserID: recipientUserID,
+		RecipientUserID: recipientIDFromModel(recipient),
 		Amount:          req.Amount,
 		Status:          result.Status,
 		TransactionType: string(req.Type),
@@ -427,6 +556,20 @@ func (s *TransactionService) executeWithMerchantID(req *legacy.TransactionReques
 		return TransactionResult{Status: legacy.StatusSystemBusy, Code: "91", Message: "failed to commit transaction"}
 	}
 
+	InvalidateBalanceCache(user.ID)
+	if recipient != nil {
+		InvalidateBalanceCache(recipient.ID)
+	}
+	if merchant != nil {
+		InvalidateMerchantBalanceCache(merchant.ID)
+		// Invalidate merchant info cache juga karena data merchant mungkin berubah
+		DeleteFromCache(fmt.Sprintf("merchant_info:%s", merchant.MerchantCode))
+	}
+	InvalidateTransactionCache(user.ID)
+	if recipient != nil {
+		InvalidateTransactionCache(recipient.ID)
+	}
+
 	return TransactionResult{
 		Status:        result.Status,
 		Code:          result.Code,
@@ -441,7 +584,25 @@ func (s *TransactionService) executeWithMerchantID(req *legacy.TransactionReques
 }
 
 func (s *TransactionService) GetUserTransactions(userID int) ([]map[string]interface{}, error) {
-	return s.Repo.GetByUserID(userID)
+	key := fmt.Sprintf("transactions:%d", userID)
+
+	if cached, ok := GetFromCache(key); ok {
+		var transactions []map[string]interface{}
+		if err := json.Unmarshal([]byte(cached), &transactions); err == nil {
+			return transactions, nil
+		}
+	}
+
+	transactions, err := s.Repo.GetByUserID(userID)
+	if err != nil {
+		return nil, err
+	}
+
+	if data, err := json.Marshal(transactions); err == nil {
+		SetCache(key, string(data), defaultCacheTTL)
+	}
+
+	return transactions, nil
 }
 
 func (s *TransactionService) ReverseTransaction(transactionID int, referenceNo string) TransactionResult {
@@ -575,6 +736,9 @@ func (s *TransactionService) ReverseTransaction(transactionID int, referenceNo s
 		return TransactionResult{Status: legacy.StatusSystemBusy, Code: "91", Message: "failed to commit reversal", TransactionID: original.ID, ReferenceNo: req.ReferenceNo}
 	}
 
+	// Invalidate cache status transaksi yang di-reverse
+	DeleteFromCache(fmt.Sprintf("tx_status:%d", original.ID))
+
 	return TransactionResult{
 		Status:        legacy.StatusSuccess,
 		Code:          "00",
@@ -633,6 +797,23 @@ func (s *TransactionService) GetUserTransactionHistory(userID int) TransactionHi
 }
 
 func (s *TransactionService) GetTransactionStatus(transactionID int) TransactionStatusResult {
+	// --- Cache L1/Redis: cek status transaksi sebelum ke DB & legacy ---
+	// TTL pendek (30 detik) karena status bisa berubah (PENDING → SUCCESS)
+	cacheKey := fmt.Sprintf("tx_status:%d", transactionID)
+	if cached, ok := GetFromCache(cacheKey); ok {
+		var item txStatusCacheItem
+		if err := json.Unmarshal([]byte(cached), &item); err == nil {
+			return TransactionStatusResult{
+				Status:        legacy.StatusSuccess,
+				Code:          "00",
+				Message:       "Transaction status retrieved from cache",
+				Data:          item.Data,
+				LegacyProfile: "cache",
+				LegacyLatency: 0,
+			}
+		}
+	}
+
 	start := time.Now()
 	req := &legacy.TransactionRequest{
 		Type:   legacy.TypeStatus,
@@ -674,6 +855,13 @@ func (s *TransactionService) GetTransactionStatus(transactionID int) Transaction
 	result.Data = data
 	result.LegacyLatency = time.Since(start).Milliseconds()
 	result.AuditID = s.recordInquiryAudit(req.Type, transactionID, result.Status, result.Message, fmt.Sprintf("transaction_id=%d ref=%s profile=%s", transactionID, req.ReferenceNo, profile))
+
+	// Simpan ke cache dengan TTL pendek setelah berhasil mendapat status transaksi
+	cacheItem := txStatusCacheItem{Data: data}
+	if cacheData, err := json.Marshal(cacheItem); err == nil {
+		SetCache(cacheKey, string(cacheData), txStatusCacheTTL)
+	}
+
 	return result
 }
 
