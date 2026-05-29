@@ -22,16 +22,7 @@ func (h *MerchantHandler) InquiryQRIS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-<<<<<<< HEAD
-	merchant, err := h.MerchantRepo.GetByCode(merchantCode)
-	if err != nil {
-		metrics.RecordBusinessOperation("QRIS_INQUIRY", "FAILED", "15", 0)
-		http.Error(w, "Merchant not found", http.StatusNotFound)
-		return
-	}
-=======
 	result := h.Service.MerchantInquiry(merchantCode)
->>>>>>> fcb2796 (Add locust testing and cache implementation)
 
 	metrics.RecordBusinessOperation("QRIS_INQUIRY", "SUCCESS", "00", 0)
 	w.Header().Set("Content-Type", "application/json")

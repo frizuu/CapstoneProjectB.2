@@ -130,38 +130,32 @@ func (h *Handler) ReverseTransaction(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GetUserTransactions(w http.ResponseWriter, r *http.Request) {
-    userIDStr := r.URL.Query().Get("user_id")
-    if userIDStr == "" {
-        http.Error(w, "user_id is required", http.StatusBadRequest)
-        return
-    }
+	userIDStr := r.URL.Query().Get("user_id")
+	if userIDStr == "" {
+		http.Error(w, "user_id is required", http.StatusBadRequest)
+		return
+	}
 
-    userID, err := strconv.Atoi(userIDStr)
-    if err != nil {
-        http.Error(w, "invalid user_id", http.StatusBadRequest)
-        return
-    }
+	userID, err := strconv.Atoi(userIDStr)
+	if err != nil {
+		http.Error(w, "invalid user_id", http.StatusBadRequest)
+		return
+	}
 
-<<<<<<< HEAD
-	result := h.Service.GetUserTransactionHistory(userID)
-	metrics.RecordBusinessOperation("TRANSACTION_HISTORY", result.Status, result.Code, 0)
-=======
-    // GANTI DARI GetUserTransactionHistory ke GetUserTransactions (yang punya cache)
-    transactions, err := h.Service.GetUserTransactions(userID)
-    if err != nil {
-        http.Error(w, "Failed to fetch transactions", http.StatusInternalServerError)
-        return
-    }
->>>>>>> fcb2796 (Add locust testing and cache implementation)
+	// GANTI DARI GetUserTransactionHistory ke GetUserTransactions (yang punya cache)
+	transactions, err := h.Service.GetUserTransactions(userID)
+	if err != nil {
+		http.Error(w, "Failed to fetch transactions", http.StatusInternalServerError)
+		return
+	}
 
-    w.Header().Set("Content-Type", "application/json")
-    json.NewEncoder(w).Encode(map[string]interface{}{
-        "status":        "SUCCESS",
-        "user_id":       userID,
-        "transactions":  transactions,
-    })
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":       "SUCCESS",
+		"user_id":      userID,
+		"transactions": transactions,
+	})
 }
-
 
 func (h *Handler) GetTransactionStatus(w http.ResponseWriter, r *http.Request) {
 	transactionIDStr := r.URL.Query().Get("transaction_id")
