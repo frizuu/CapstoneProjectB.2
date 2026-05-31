@@ -14,6 +14,7 @@ type MerchantHandler struct {
 	Service      *service.TransactionService
 }
 
+// InquiryQRIS sekarang memanggil service.MerchantInquiry agar cache L1/Redis terpakai
 func (h *MerchantHandler) InquiryQRIS(w http.ResponseWriter, r *http.Request) {
 	merchantCode := r.URL.Query().Get("merchant_code")
 	if merchantCode == "" {
@@ -21,22 +22,14 @@ func (h *MerchantHandler) InquiryQRIS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	merchant, err := h.MerchantRepo.GetByCode(merchantCode)
-	if err != nil {
-		metrics.RecordBusinessOperation("QRIS_INQUIRY", "FAILED", "15", 0)
-		http.Error(w, "Merchant not found", http.StatusNotFound)
-		return
-	}
+	result := h.Service.MerchantInquiry(merchantCode)
 
 	metrics.RecordBusinessOperation("QRIS_INQUIRY", "SUCCESS", "00", 0)
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":        "SUCCESS",
-		"merchant_id":   merchant.ID,
-		"merchant_name": merchant.Name,
-		"merchant_code": merchant.MerchantCode,
-		"category":      merchant.Category,
-	})
+	if result.Code != "00" {
+		w.WriteHeader(http.StatusNotFound)
+	}
+	json.NewEncoder(w).Encode(result)
 }
 
 func (h *MerchantHandler) GetMerchantBalance(w http.ResponseWriter, r *http.Request) {

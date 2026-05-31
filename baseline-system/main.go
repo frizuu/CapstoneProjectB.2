@@ -7,15 +7,37 @@ import (
 	"baseline-system/messaging"
 	"baseline-system/repository"
 	"baseline-system/service"
+	"fmt"
+	"log"
 	"baseline-system/worker" // Imported the worker package!
 	"log"
 	"net/http"
 	"os"
+	"os"
 )
 
 func main() {
+	redisHost := os.Getenv("REDIS_HOST")
+	if redisHost == "" {
+		redisHost = "localhost"
+	}
 
-	// Koneksi Database
+	redisPort := os.Getenv("REDIS_PORT")
+	if redisPort == "" {
+		redisPort = "6379"
+	}
+
+	cacheMode := os.Getenv("CACHE_MODE")
+	if cacheMode == "" {
+		cacheMode = "full"
+	}
+
+	if err := service.InitCache(fmt.Sprintf("%s:%s", redisHost, redisPort), cacheMode); err != nil {
+		log.Fatalf("failed to initialize cache: %v", err)
+	}
+
+	log.Printf("cache initialized: mode=%s redis=%s:%s", cacheMode, redisHost, redisPort)
+
 	db := config.ConnectDB()
 
 	// Koneksi Redis Cache
@@ -39,13 +61,32 @@ func main() {
 		defer rabbitCh.Close()
 	}
 
-	// Repository
+	// Koneksi Redis Cache
+	redisAddr := os.Getenv("REDIS_URL")
+	if redisAddr == "" {
+		// Default to localhost if not running in docker, or "redis:6379" if using docker-compose networks
+		redisAddr = "localhost:6379"
+	}
+	redisCache := cache.NewRedisCache(redisAddr, "", 0)
+
+	// Koneksi RabbitMQ
+	amqpURL := os.Getenv("RABBITMQ_URL")
+	if amqpURL == "" {
+		amqpURL = "amqp://guest:guest@localhost:5672/"
+	}
+	rabbitConn, rabbitCh := messaging.ConnectRabbitMQ(amqpURL)
+	if rabbitConn != nil {
+		defer rabbitConn.Close()
+	}
+	if rabbitCh != nil {
+		defer rabbitCh.Close()
+	}
+
 	repo := &repository.TransactionRepo{DB: db}
 	userRepo := &repository.UserRepo{DB: db}
 	merchantRepo := &repository.MerchantRepo{DB: db}
 	auditRepo := &repository.AuditRepo{DB: db}
 	ledgerRepo := &repository.LedgerRepo{DB: db}
-
 	if err := repo.EnsureSchema(); err != nil {
 		panic(err)
 	}
@@ -62,19 +103,20 @@ func main() {
 		RabbitMQ:     rabbitCh,
 	}
 
-	// Handler
 	userHandler := &handler.UserHandler{Service: svc}
-	merchantHandler := &handler.MerchantHandler{MerchantRepo: merchantRepo, Service: svc}
+	merchantHandler := &handler.MerchantHandler{
+		MerchantRepo: merchantRepo,
+		Service:      svc,
+	}
+
 	h := &handler.Handler{Service: svc}
 
 	mux := http.NewServeMux()
 
-	// Routes - existing
 	mux.HandleFunc("/payment", metrics.InstrumentHTTP("/payment", h.Payment))
 	mux.HandleFunc("/transaction/reversal", metrics.InstrumentHTTP("/transaction/reversal", h.ReverseTransaction))
 	mux.HandleFunc("/balance", metrics.InstrumentHTTP("/balance", userHandler.GetBalance))
 
-	// Routes - QRIS
 	http.HandleFunc("/qris/inquiry", merchantHandler.InquiryQRIS)
 	http.HandleFunc("/qris/payment", h.PaymentQRIS)
 	http.HandleFunc("/merchant/balance", merchantHandler.GetMerchantBalance)
@@ -92,7 +134,9 @@ func main() {
 	mux.HandleFunc("/merchants", metrics.InstrumentHTTP("/merchants", merchantHandler.GetAllMerchants))
 	mux.HandleFunc("/transactions", metrics.InstrumentHTTP("/transactions", h.GetUserTransactions))
 	mux.HandleFunc("/transaction/status", metrics.InstrumentHTTP("/transaction/status", h.GetTransactionStatus))
+
 	mux.HandleFunc("/metrics", metrics.Handler)
-	println("Server running on :8080")
-	http.ListenAndServe(":8080", mux)
+
+	log.Println("Server running on :8080")
+	log.Fatal(http.ListenAndServe(":8080", mux))
 }

@@ -142,11 +142,19 @@ func (h *Handler) GetUserTransactions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result := h.Service.GetUserTransactionHistory(userID)
-	metrics.RecordBusinessOperation("TRANSACTION_HISTORY", result.Status, result.Code, 0)
+	// GANTI DARI GetUserTransactionHistory ke GetUserTransactions (yang punya cache)
+	transactions, err := h.Service.GetUserTransactions(userID)
+	if err != nil {
+		http.Error(w, "Failed to fetch transactions", http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":       "SUCCESS",
+		"user_id":      userID,
+		"transactions": transactions,
+	})
 }
 
 func (h *Handler) GetTransactionStatus(w http.ResponseWriter, r *http.Request) {
