@@ -179,7 +179,7 @@ fun TransferHistoryScreen(
                 )
 
                 Text(
-                    text = "Tampilkan transaksi QRIS dan transfer",
+                    text = "Tampilkan transaksi QRIS, transfer, dan baseline",
                     style = MaterialTheme.typography.bodyMedium,
                     color = AppColor.TextDark
                 )
@@ -192,7 +192,7 @@ fun TransferHistoryScreen(
                 verticalAlignment = Alignment.Top
             ) {
                 Text(
-                    text = "Mei 2026",
+                    text = "Riwayat",
                     modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
@@ -309,24 +309,24 @@ fun HistoryItemV2(
     currentUserId: Int,
     onClick: () -> Unit
 ) {
-    val type = transaction.transactionType.uppercase()
+    val type = normalizeTransactionType(transaction)
     val isIncoming = isIncomingTransfer(transaction, currentUserId)
 
     val title = when {
         type == "QRIS" -> {
-            "Bayar QRIS ke ${transaction.merchantName}"
+            "Bayar QRIS ke ${safeMerchantName(transaction)}"
         }
 
         type == "TRANSFER" && isIncoming -> {
-            "Terima uang dari ${transaction.senderName ?: "Pengirim"}"
+            "Terima uang dari ${safeSenderName(transaction)}"
         }
 
         type == "TRANSFER" -> {
-            "Transfer ke ${transaction.recipientUserName ?: transaction.merchantName}"
+            "Transfer ke ${safeRecipientName(transaction)}"
         }
 
         else -> {
-            transaction.merchantName
+            "Transaksi Baseline"
         }
     }
 
@@ -334,7 +334,7 @@ fun HistoryItemV2(
         type == "QRIS" -> "Pembayaran QRIS"
         type == "TRANSFER" && isIncoming -> "Transfer masuk"
         type == "TRANSFER" -> "Transfer keluar"
-        else -> "Pembayaran"
+        else -> "Aktivitas awal dari data baseline"
     }
 
     val amountText = if (isIncoming) {
@@ -346,13 +346,13 @@ fun HistoryItemV2(
     val iconText = when (type) {
         "QRIS" -> "QR"
         "TRANSFER" -> "TF"
-        else -> "TX"
+        else -> "BL"
     }
 
-    val iconBackground = if (isIncoming) {
-        Color(0xFFE8F5E9)
-    } else {
-        Color(0xFFFFF3E0)
+    val iconBackground = when {
+        isIncoming -> Color(0xFFE8F5E9)
+        type == "BASELINE" -> Color(0xFFE3F2FD)
+        else -> Color(0xFFFFF3E0)
     }
 
     val amountColor = if (isIncoming) {
@@ -429,14 +429,10 @@ fun HistoryItemV2(
             Spacer(modifier = Modifier.height(4.dp))
 
             Text(
-                text = if (transaction.status == "SUCCESS") {
-                    "Berhasil"
-                } else {
-                    transaction.status
-                },
+                text = formatStatusText(transaction.status),
                 style = MaterialTheme.typography.bodySmall,
                 fontWeight = FontWeight.Bold,
-                color = if (transaction.status == "SUCCESS") {
+                color = if (transaction.status.uppercase() == "SUCCESS") {
                     Color(0xFF008A3D)
                 } else {
                     Color(0xFFC62828)
@@ -450,7 +446,7 @@ private fun isIncomingTransfer(
     transaction: TransactionData,
     currentUserId: Int
 ): Boolean {
-    return transaction.transactionType.uppercase() == "TRANSFER" &&
+    return normalizeTransactionType(transaction) == "TRANSFER" &&
             transaction.recipientUserId == currentUserId &&
             transaction.userId.toIntOrNull() != currentUserId
 }
@@ -459,10 +455,62 @@ private fun isOutgoingForCurrentUser(
     transaction: TransactionData,
     currentUserId: Int
 ): Boolean {
-    return when (transaction.transactionType.uppercase()) {
+    val type = normalizeTransactionType(transaction)
+
+    return when (type) {
         "TRANSFER" -> transaction.userId.toIntOrNull() == currentUserId
         "QRIS" -> transaction.userId.toIntOrNull() == currentUserId
-        else -> true
+        "BASELINE" -> transaction.userId.toIntOrNull() == currentUserId
+        else -> transaction.userId.toIntOrNull() == currentUserId
+    }
+}
+
+private fun normalizeTransactionType(
+    transaction: TransactionData
+): String {
+    val rawType = transaction.transactionType.trim().uppercase()
+
+    return when {
+        rawType == "QRIS" -> "QRIS"
+        rawType == "TRANSFER" -> "TRANSFER"
+        rawType == "REFUND" -> "REFUND"
+        else -> "BASELINE"
+    }
+}
+
+private fun safeMerchantName(
+    transaction: TransactionData
+): String {
+    return transaction.merchantName
+        .takeIf { it.isNotBlank() && it.lowercase() != "null" }
+        ?: "Merchant"
+}
+
+private fun safeRecipientName(
+    transaction: TransactionData
+): String {
+    return transaction.recipientUserName
+        ?.takeIf { it.isNotBlank() && it.lowercase() != "null" }
+        ?: transaction.merchantName.takeIf { it.isNotBlank() && it.lowercase() != "null" }
+        ?: "Penerima"
+}
+
+private fun safeSenderName(
+    transaction: TransactionData
+): String {
+    return transaction.senderName
+        ?.takeIf { it.isNotBlank() && it.lowercase() != "null" }
+        ?: "Pengirim"
+}
+
+private fun formatStatusText(
+    status: String
+): String {
+    return when (status.uppercase()) {
+        "SUCCESS" -> "Berhasil"
+        "FAILED" -> "Gagal"
+        "TIMEOUT" -> "Timeout"
+        else -> status.ifBlank { "Unknown" }
     }
 }
 

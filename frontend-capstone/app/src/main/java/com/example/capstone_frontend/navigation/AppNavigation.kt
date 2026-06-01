@@ -13,10 +13,11 @@ import com.example.capstone_frontend.data.DummyRepository
 import com.example.capstone_frontend.data.PaymentRequest
 import com.example.capstone_frontend.data.QrisPaymentRequest
 import com.example.capstone_frontend.data.RetrofitClient
-import com.example.capstone_frontend.screen.AdminDashboardScreen
-import com.example.capstone_frontend.screen.AdminLoginScreen
+import com.example.capstone_frontend.screen.AdminDashboardScreenV2
+import com.example.capstone_frontend.screen.AdminLoginScreenV2
 import com.example.capstone_frontend.screen.HelpScreen
 import com.example.capstone_frontend.screen.LandingScreen
+import com.example.capstone_frontend.screen.NotificationScreen
 import com.example.capstone_frontend.screen.PaymentResultV2Screen
 import com.example.capstone_frontend.screen.QrScannerScreen
 import com.example.capstone_frontend.screen.QrisPaymentScreen
@@ -108,8 +109,8 @@ fun AppNavigation() {
                 onHistoryClick = {
                     navController.navigate("history")
                 },
-                onStatusClick = {
-                    navController.navigate("status")
+                onNotificationClick = {
+                    navController.navigate("notifications")
                 },
                 onHelpClick = {
                     navController.navigate("help")
@@ -381,6 +382,17 @@ fun AppNavigation() {
             )
         }
 
+        composable("notifications") {
+            NotificationScreen(
+                onBack = {
+                    navController.popBackStack()
+                },
+                onTransactionClick = { transactionId ->
+                    navController.navigate("transaction_detail/$transactionId")
+                }
+            )
+        }
+
         composable(
             route = "transaction_detail/{transactionId}",
             arguments = listOf(
@@ -418,7 +430,7 @@ fun AppNavigation() {
         }
 
         composable("admin_login") {
-            AdminLoginScreen(
+            AdminLoginScreenV2(
                 onLoginSuccess = {
                     navController.navigate("admin_dashboard") {
                         popUpTo("landing") {
@@ -433,7 +445,7 @@ fun AppNavigation() {
         }
 
         composable("admin_dashboard") {
-            AdminDashboardScreen(
+            AdminDashboardScreenV2(
                 onLogout = {
                     navController.navigate("landing") {
                         popUpTo("admin_dashboard") {
