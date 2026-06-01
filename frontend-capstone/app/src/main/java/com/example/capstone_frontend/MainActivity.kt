@@ -1,37 +1,43 @@
 package com.example.capstone_frontend
 
 import android.os.Bundle
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
-import com.example.capstone_frontend.data.DummyRepository // assuming you use this to get the user ID
-import com.example.capstone_frontend.data.WebSocketManager
-import com.example.capstone_frontend.ui.theme.Capstone_FrontendTheme
+import androidx.appcompat.app.AppCompatActivity
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.util.concurrent.TimeUnit
 
-class MainActivity : ComponentActivity() {
+class MainActivity : AppCompatActivity() {
 
-    // 1. Declare the WebSocketManager
-    private lateinit var webSocketManager: WebSocketManager
+    private lateinit var webSocket: okhttp3.WebSocket
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
 
-        // 2. Initialize it with the current User's ID (e.g., User 2)
-        val currentUserId = DummyRepository.getCurrentUserId() // Or just hardcode '2' for testing
-        webSocketManager = WebSocketManager(loggedInUserId = currentUserId)
+        connectToWebSocket()
+    }
 
-        // 3. Connect it!
-        webSocketManager.connect()
+    private fun connectToWebSocket() {
+        // 1. Build the OkHttpClient (no timeouts for WebSockets)
+        val client = OkHttpClient.Builder()
+            .readTimeout(0, TimeUnit.MILLISECONDS)
+            .build()
 
-        setContent {
-            Capstone_FrontendTheme {
-                // Your existing AppNavigation() or Compose UI goes here
-            }
-        }
+        // 2. Point to the Go server using the Emulator's localhost (10.0.2.2)
+        val request = Request.Builder()
+            .url("ws://10.0.2.2:8080/ws")
+            .build()
+
+        // 3. Connect!
+        val listener = TransactionWebSocketListener()
+        webSocket = client.newWebSocket(request, listener)
     }
 
     override fun onDestroy() {
         super.onDestroy()
         // Clean up the connection when the app closes
-        webSocketManager.disconnect()
+        if (::webSocket.isInitialized) {
+            webSocket.close(1000, "Activity Destroyed")
+        }
     }
 }

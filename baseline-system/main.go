@@ -58,8 +58,13 @@ func main() {
 	if err := repo.EnsureSchema(); err != nil {
 		panic(err)
 	}
+
+	// ---> NEW: Initialize WebSocket Manager before the worker <---
+	wsManager := handler.NewWSManager()
+
 	if rabbitCh != nil {
-		worker.StartAuditWorker(rabbitCh, auditRepo)
+		// ---> MODIFIED: Pass the wsManager to the worker <---
+		worker.StartAuditWorker(rabbitCh, auditRepo, wsManager)
 	}
 
 	// Service (sekarang menerima DB, Cache, dan RabbitMQ)
@@ -96,6 +101,9 @@ func main() {
 	mux.HandleFunc("/transaction/status", metrics.InstrumentHTTP("/transaction/status", h.GetTransactionStatus))
 
 	mux.HandleFunc("/metrics", metrics.Handler)
+
+	// ---> NEW: Expose the WebSocket endpoint <---
+	mux.HandleFunc("/ws", wsManager.HandleWebSocket)
 
 	log.Println("Server running on :8080")
 	log.Fatal(http.ListenAndServe(":8080", mux))

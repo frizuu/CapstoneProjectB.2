@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"baseline-system/handler"
 	"baseline-system/messaging"
 	"baseline-system/model"
 	"baseline-system/repository"
@@ -10,7 +11,8 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-func StartAuditWorker(ch *amqp.Channel, auditRepo *repository.AuditRepo) {
+// ---> UPDATE SIGNATURE: Added wsManager *handler.WSManager <---
+func StartAuditWorker(ch *amqp.Channel, auditRepo *repository.AuditRepo, wsManager *handler.WSManager) {
 	q, err := ch.QueueDeclare(
 		"audit_logs_queue", true, false, false, false, nil,
 	)
@@ -52,6 +54,12 @@ func StartAuditWorker(ch *amqp.Channel, auditRepo *repository.AuditRepo) {
 				log.Printf("Failed to save audit log to DB: %v", err)
 			} else {
 				log.Printf("Saved async audit log for ReferenceID: %d", entry.ReferenceID)
+
+				// ---> NEW: Broadcast to WebSocket! <---
+				// We use the ReferenceID (which holds the UserID) to target the specific user
+				if wsManager != nil {
+					wsManager.SendToUser(entry.ReferenceID, "TRANSACTION_UPDATE", payload)
+				}
 			}
 		}
 	}()
