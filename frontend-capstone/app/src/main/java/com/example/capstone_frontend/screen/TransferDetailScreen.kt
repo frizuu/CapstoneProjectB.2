@@ -19,6 +19,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -27,6 +32,8 @@ import androidx.compose.ui.unit.dp
 import com.example.capstone_frontend.component.AppColor
 import com.example.capstone_frontend.component.formatRupiah
 import com.example.capstone_frontend.data.DummyRepository
+import com.example.capstone_frontend.data.RetrofitClient
+import com.example.capstone_frontend.model.TransactionData
 import java.text.SimpleDateFormat
 import java.util.Locale
 
@@ -36,9 +43,53 @@ fun TransferDetailScreen(
     onBack: () -> Unit
 ) {
     val currentUserId = DummyRepository.getCurrentUserId()
-    val transaction = DummyRepository.getTransactionById(transactionId)
 
-    if (transaction == null) {
+    var transaction by remember(transactionId) {
+        mutableStateOf<TransactionData?>(DummyRepository.getTransactionById(transactionId))
+    }
+
+    var isLoading by remember(transactionId) {
+        mutableStateOf(transaction == null)
+    }
+
+    var errorMessage by remember(transactionId) {
+        mutableStateOf("")
+    }
+
+    LaunchedEffect(transactionId, currentUserId) {
+        if (transaction == null) {
+            try {
+                isLoading = true
+                errorMessage = ""
+
+                try {
+                    val merchantResponse = RetrofitClient.api.getMerchants()
+                    DummyRepository.setMerchantCache(merchantResponse.merchants)
+                } catch (_: Exception) {
+                }
+
+                val response = RetrofitClient.api.getTransactions(currentUserId)
+                val convertedTransactions = DummyRepository.convertBackendTransactions(response)
+
+                DummyRepository.setBackendTransactions(convertedTransactions)
+
+                transaction = convertedTransactions.firstOrNull {
+                    it.transactionId == transactionId
+                } ?: convertedTransactions.firstOrNull {
+                    normalizeTransactionIdForCompare(it.transactionId) ==
+                            normalizeTransactionIdForCompare(transactionId)
+                }
+            } catch (e: Exception) {
+                errorMessage = e.message ?: "Gagal memuat detail transaksi."
+            } finally {
+                isLoading = false
+            }
+        } else {
+            isLoading = false
+        }
+    }
+
+    if (isLoading) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -59,47 +110,135 @@ fun TransferDetailScreen(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            Text(
-                text = "Transaksi tidak ditemukan.",
-                style = MaterialTheme.typography.bodyLarge,
-                color = AppColor.TextGray
-            )
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(22.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+            ) {
+                Text(
+                    text = "Memuat detail transaksi...",
+                    modifier = Modifier.padding(20.dp),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = AppColor.TextGray
+                )
+            }
         }
 
         return
     }
 
-    val type = transaction.transactionType.uppercase()
+    val currentTransaction = transaction
+
+    if (currentTransaction == null) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(AppColor.Background)
+                .padding(22.dp)
+        ) {
+            Spacer(modifier = Modifier.height(34.dp))
+
+            TextButton(
+                onClick = onBack
+            ) {
+                Text(
+                    text = "← Kembali",
+                    color = AppColor.Primary,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(22.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(20.dp)
+                ) {
+                    Text(
+                        text = "Transaksi tidak ditemukan.",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = AppColor.TextDark
+                    )
+
+                    if (errorMessage.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Text(
+                            text = errorMessage,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFFC62828)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(
+                        text = "Silakan kembali ke riwayat atau notifikasi, lalu buka ulang transaksi.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = AppColor.TextGray
+                    )
+                }
+            }
+        }
+
+        return
+    }
+
+    val type = normalizeDetailTransactionType(currentTransaction.transactionType)
 
     val isIncomingTransfer = type == "TRANSFER" &&
-            transaction.recipientUserId == currentUserId &&
-            transaction.userId.toIntOrNull() != currentUserId
+            currentTransaction.recipientUserId == currentUserId &&
+            currentTransaction.userId.toIntOrNull() != currentUserId
 
     val senderName = when (type) {
-        "TRANSFER" -> transaction.senderName ?: "Pengirim"
-        else -> DummyRepository.getCurrentUserName()
+        "TRANSFER" -> currentTransaction.senderName
+            ?.takeIf { it.isNotBlank() && it.lowercase() != "null" }
+            ?: "Pengirim"
+
+        "QRIS" -> DummyRepository.getCurrentUserName()
+
+        else -> "User ID ${currentTransaction.userId}"
     }
 
     val receiverName = when (type) {
-        "TRANSFER" -> transaction.recipientUserName ?: transaction.merchantName
-        "QRIS" -> transaction.merchantName
-        else -> transaction.merchantName
+        "TRANSFER" -> currentTransaction.recipientUserName
+            ?.takeIf { it.isNotBlank() && it.lowercase() != "null" }
+            ?: "Penerima"
+
+        "QRIS" -> currentTransaction.merchantName
+            .takeIf { it.isNotBlank() && it.lowercase() != "null" }
+            ?: "Merchant"
+
+        else -> "Sistem Baseline"
     }
 
     val amountTitle = if (isIncomingTransfer) {
-        "+${formatRupiah(transaction.amount)}"
+        "+${formatRupiah(currentTransaction.amount)}"
     } else {
-        formatRupiah(transaction.amount)
+        formatRupiah(currentTransaction.amount)
     }
 
     val description = when (type) {
-        "QRIS" -> "Bayar QRIS ke ${transaction.merchantName}"
+        "QRIS" -> "Bayar QRIS ke $receiverName"
         "TRANSFER" -> if (isIncomingTransfer) {
             "Terima uang dari $senderName"
         } else {
             "Transfer ke $receiverName"
         }
-        else -> transaction.merchantName
+
+        else -> "Transaksi baseline dari data awal sistem"
+    }
+
+    val methodText = when (type) {
+        "QRIS" -> "QRIS"
+        "TRANSFER" -> "Transfer Saldo"
+        else -> "Baseline Transaction"
     }
 
     Column(
@@ -172,7 +311,11 @@ fun TransferDetailScreen(
                     label = "Dari",
                     initial = senderName.take(1).uppercase(),
                     name = senderName,
-                    subtitle = "Saldo Utama"
+                    subtitle = if (type == "BASELINE") {
+                        "Data awal baseline"
+                    } else {
+                        "Saldo Utama"
+                    }
                 )
 
                 DetailDividerV2()
@@ -181,40 +324,36 @@ fun TransferDetailScreen(
                     label = "Ke",
                     initial = receiverName.take(1).uppercase(),
                     name = receiverName,
-                    subtitle = if (type == "QRIS") {
-                        "Merchant QRIS"
-                    } else {
-                        "Saldo Utama"
+                    subtitle = when (type) {
+                        "QRIS" -> "Merchant QRIS"
+                        "TRANSFER" -> "Saldo Utama"
+                        else -> "Sistem Baseline"
                     }
                 )
 
                 DetailDividerV2()
 
                 DetailInfoRowV2(
-                    label = if (type == "QRIS") {
-                        "Jumlah Pembayaran"
-                    } else {
-                        "Jumlah Transfer"
+                    label = when (type) {
+                        "QRIS" -> "Jumlah Pembayaran"
+                        "TRANSFER" -> "Jumlah Transfer"
+                        else -> "Jumlah Transaksi"
                     },
-                    value = formatRupiah(transaction.amount)
+                    value = formatRupiah(currentTransaction.amount)
                 )
 
                 DetailDividerV2()
 
                 DetailInfoRowV2(
                     label = "No. Transaksi",
-                    value = transaction.transactionId
+                    value = currentTransaction.transactionId
                 )
 
                 DetailDividerV2()
 
                 DetailInfoRowV2(
                     label = "Metode Transaksi",
-                    value = when (type) {
-                        "QRIS" -> "QRIS"
-                        "TRANSFER" -> "Transfer Saldo"
-                        else -> "Transaksi Biasa"
-                    }
+                    value = methodText
                 )
 
                 DetailDividerV2()
@@ -228,26 +367,22 @@ fun TransferDetailScreen(
 
                 DetailInfoRowV2(
                     label = "Status",
-                    value = if (transaction.status == "SUCCESS") {
-                        "Berhasil"
-                    } else {
-                        transaction.status
-                    }
+                    value = formatDetailStatus(currentTransaction.status)
                 )
 
                 DetailDividerV2()
 
                 DetailInfoRowV2(
                     label = "Waktu Transaksi",
-                    value = formatDetailTimeV2(transaction.createdAt)
+                    value = formatDetailTimeV2(currentTransaction.createdAt)
                 )
 
-                if (transaction.referenceNo != null) {
+                if (!currentTransaction.referenceNo.isNullOrBlank()) {
                     DetailDividerV2()
 
                     DetailInfoRowV2(
                         label = "Reference No",
-                        value = transaction.referenceNo
+                        value = currentTransaction.referenceNo
                     )
                 }
             }
@@ -298,7 +433,7 @@ fun DetailPartyRowV2(
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = initial,
+                    text = initial.ifBlank { "?" },
                     color = Color.White,
                     fontWeight = FontWeight.Bold
                 )
@@ -362,6 +497,40 @@ fun DetailDividerV2() {
     )
 
     Spacer(modifier = Modifier.height(18.dp))
+}
+
+private fun normalizeDetailTransactionType(
+    transactionType: String
+): String {
+    val rawType = transactionType.trim().uppercase()
+
+    return when {
+        rawType == "QRIS" -> "QRIS"
+        rawType == "TRANSFER" -> "TRANSFER"
+        rawType == "REFUND" -> "REFUND"
+        else -> "BASELINE"
+    }
+}
+
+private fun normalizeTransactionIdForCompare(
+    transactionId: String
+): String {
+    return transactionId
+        .uppercase()
+        .replace("TRX-", "")
+        .trimStart('0')
+        .ifBlank { transactionId.uppercase() }
+}
+
+private fun formatDetailStatus(
+    status: String
+): String {
+    return when (status.uppercase()) {
+        "SUCCESS" -> "Berhasil"
+        "FAILED" -> "Gagal"
+        "TIMEOUT" -> "Timeout"
+        else -> status.ifBlank { "Unknown" }
+    }
 }
 
 private fun formatDetailTimeV2(
