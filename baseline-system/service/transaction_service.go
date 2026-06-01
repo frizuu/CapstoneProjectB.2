@@ -381,7 +381,7 @@ func (s *TransactionService) executeWithMerchantID(req *legacy.TransactionReques
 	//    Pemanggilan dilakukan di LUAR transaksi database agar tidak menahan lock baris!
 	result := legacy.ExecuteTransaction(req, user, merchant)
 
-	audit := &model.AuditEntry{
+	auditPayload := messaging.AuditPayload{
 		EventType:    "TRANSACTION",
 		EventSubType: string(req.Type),
 		ReferenceID:  req.UserID,
@@ -389,6 +389,11 @@ func (s *TransactionService) executeWithMerchantID(req *legacy.TransactionReques
 		Message:      result.Message,
 		Payload:      fmt.Sprintf("user=%d recipient_user=%d amount=%d merchant=%s ref=%s profile=%s latency_ms=%d need_reversal=%t", req.UserID, req.RecipientUserID, req.Amount, req.MerchantCode, req.ReferenceNo, result.Profile, result.LatencyMs, result.NeedReversal),
 		CreatedAt:    time.Now().Format(time.RFC3339),
+	}
+
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return TransactionResult{Status: legacy.StatusSystemBusy, Code: "91", Message: "unable to start transaction"}
 	}
 
 	if result.Status != legacy.StatusSuccess {
@@ -457,7 +462,7 @@ func (s *TransactionService) executeWithMerchantID(req *legacy.TransactionReques
 
 	var merchantID int
 	if merchant != nil {
-		newMerchantBalance = merchant.Balance + int64(req.Amount)
+		newMerchantBalance := merchant.Balance + int64(req.Amount)
 		if err := s.MerchantRepo.UpdateBalanceWithTx(tx, merchant.ID, newMerchantBalance); err != nil {
 			tx.Rollback()
 			return TransactionResult{Status: legacy.StatusFailed, Code: "95", Message: "failed to credit merchant account"}
@@ -511,6 +516,11 @@ func (s *TransactionService) executeWithMerchantID(req *legacy.TransactionReques
 	if err := tx.Commit(); err != nil {
 		tx.Rollback()
 		return TransactionResult{Status: legacy.StatusSystemBusy, Code: "91", Message: "failed to commit transaction"}
+	}
+
+	// ---> FIX: Fire Async Audit for successful transaction <---
+	if s.RabbitMQ != nil {
+		go messaging.PublishAuditEvent(s.RabbitMQ, auditPayload)
 	}
 
 	return TransactionResult{
@@ -804,7 +814,7 @@ func (s *TransactionService) GetTransactionStatus(transactionID int) Transaction
 }
 
 // ---> ASYNC DECOUPLING: recordInquiryAudit now fires a RabbitMQ message instead of saving to the DB!
-func (s *TransactionService) recordInquiryAudit(eventSubType string, referenceID int, status string, message string, payload string) {
+func (s *TransactionService) recordInquiryAudit(eventSubType string, referenceID int, status string, message string, payload string) int {
 	if s.RabbitMQ != nil {
 		auditPayload := messaging.AuditPayload{
 			EventType:    "INQUIRY",
@@ -817,6 +827,7 @@ func (s *TransactionService) recordInquiryAudit(eventSubType string, referenceID
 		}
 		go messaging.PublishAuditEvent(s.RabbitMQ, auditPayload)
 	}
+	return 0
 }
 
 func (s *TransactionService) transactionToResult(t *model.Transaction, idempotent bool) TransactionResult {

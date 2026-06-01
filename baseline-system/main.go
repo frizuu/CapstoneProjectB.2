@@ -5,75 +5,43 @@ import (
 	"baseline-system/config"
 	"baseline-system/handler"
 	"baseline-system/messaging"
+	"baseline-system/metrics"
 	"baseline-system/repository"
 	"baseline-system/service"
+	"baseline-system/worker"
 	"fmt"
-	"log"
-	"baseline-system/worker" // Imported the worker package!
 	"log"
 	"net/http"
 	"os"
-	"os"
 )
 
+func envOrDefault(key string, fallback string) string {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+	return value
+}
+
 func main() {
-	redisHost := os.Getenv("REDIS_HOST")
-	if redisHost == "" {
-		redisHost = "localhost"
+	redisHost := envOrDefault("REDIS_HOST", "localhost")
+	redisPort := envOrDefault("REDIS_PORT", "6380")
+	redisAddr := envOrDefault("REDIS_URL", fmt.Sprintf("%s:%s", redisHost, redisPort))
+	cacheMode := envOrDefault("CACHE_MODE", "full")
+
+	if err := service.InitCache(redisAddr, cacheMode); err != nil {
+		log.Printf("cache initialization warning: %v", err)
 	}
 
-	redisPort := os.Getenv("REDIS_PORT")
-	if redisPort == "" {
-		redisPort = "6379"
-	}
-
-	cacheMode := os.Getenv("CACHE_MODE")
-	if cacheMode == "" {
-		cacheMode = "full"
-	}
-
-	if err := service.InitCache(fmt.Sprintf("%s:%s", redisHost, redisPort), cacheMode); err != nil {
-		log.Fatalf("failed to initialize cache: %v", err)
-	}
-
-	log.Printf("cache initialized: mode=%s redis=%s:%s", cacheMode, redisHost, redisPort)
+	log.Printf("cache initialized: requested_mode=%s active_mode=%s redis=%s", cacheMode, service.CacheMode(), redisAddr)
 
 	db := config.ConnectDB()
 
 	// Koneksi Redis Cache
-	redisAddr := os.Getenv("REDIS_URL")
-	if redisAddr == "" {
-		// Default to localhost if not running in docker, or "redis:6379" if using docker-compose networks
-		redisAddr = "localhost:6379"
-	}
 	redisCache := cache.NewRedisCache(redisAddr, "", 0)
 
 	// Koneksi RabbitMQ
-	amqpURL := os.Getenv("RABBITMQ_URL")
-	if amqpURL == "" {
-		amqpURL = "amqp://guest:guest@localhost:5672/"
-	}
-	rabbitConn, rabbitCh := messaging.ConnectRabbitMQ(amqpURL)
-	if rabbitConn != nil {
-		defer rabbitConn.Close()
-	}
-	if rabbitCh != nil {
-		defer rabbitCh.Close()
-	}
-
-	// Koneksi Redis Cache
-	redisAddr := os.Getenv("REDIS_URL")
-	if redisAddr == "" {
-		// Default to localhost if not running in docker, or "redis:6379" if using docker-compose networks
-		redisAddr = "localhost:6379"
-	}
-	redisCache := cache.NewRedisCache(redisAddr, "", 0)
-
-	// Koneksi RabbitMQ
-	amqpURL := os.Getenv("RABBITMQ_URL")
-	if amqpURL == "" {
-		amqpURL = "amqp://guest:guest@localhost:5672/"
-	}
+	amqpURL := envOrDefault("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/")
 	rabbitConn, rabbitCh := messaging.ConnectRabbitMQ(amqpURL)
 	if rabbitConn != nil {
 		defer rabbitConn.Close()
@@ -89,6 +57,9 @@ func main() {
 	ledgerRepo := &repository.LedgerRepo{DB: db}
 	if err := repo.EnsureSchema(); err != nil {
 		panic(err)
+	}
+	if rabbitCh != nil {
+		worker.StartAuditWorker(rabbitCh, auditRepo)
 	}
 
 	// Service (sekarang menerima DB, Cache, dan RabbitMQ)
@@ -117,17 +88,6 @@ func main() {
 	mux.HandleFunc("/transaction/reversal", metrics.InstrumentHTTP("/transaction/reversal", h.ReverseTransaction))
 	mux.HandleFunc("/balance", metrics.InstrumentHTTP("/balance", userHandler.GetBalance))
 
-	http.HandleFunc("/qris/inquiry", merchantHandler.InquiryQRIS)
-	http.HandleFunc("/qris/payment", h.PaymentQRIS)
-	http.HandleFunc("/merchant/balance", merchantHandler.GetMerchantBalance)
-	http.HandleFunc("/merchants", merchantHandler.GetAllMerchants)
-	http.HandleFunc("/transactions", h.GetUserTransactions)
-	http.HandleFunc("/transaction/status", h.GetTransactionStatus)
-
-	log.Println("Server running on :8080")
-	if err := http.ListenAndServe(":8080", nil); err != nil {
-		log.Fatalf("Server failed to start: %v", err)
-	}
 	mux.HandleFunc("/qris/inquiry", metrics.InstrumentHTTP("/qris/inquiry", merchantHandler.InquiryQRIS))
 	mux.HandleFunc("/qris/payment", metrics.InstrumentHTTP("/qris/payment", h.PaymentQRIS))
 	mux.HandleFunc("/merchant/balance", metrics.InstrumentHTTP("/merchant/balance", merchantHandler.GetMerchantBalance))

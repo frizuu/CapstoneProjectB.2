@@ -25,12 +25,15 @@ type EventPayload struct {
 func ConnectRabbitMQ(url string) (*amqp.Connection, *amqp.Channel) {
 	conn, err := amqp.Dial(url)
 	if err != nil {
-		log.Fatalf("Failed to connect to RabbitMQ: %v", err)
+		log.Printf("RabbitMQ unavailable at %s; async audit publishing disabled: %v", url, err)
+		return nil, nil
 	}
 
 	ch, err := conn.Channel()
 	if err != nil {
-		log.Fatalf("Failed to open a channel: %v", err)
+		log.Printf("Failed to open RabbitMQ channel; async audit publishing disabled: %v", err)
+		_ = conn.Close()
+		return nil, nil
 	}
 
 	// Setup a Fanout Exchange for prototype scope
@@ -45,13 +48,21 @@ func ConnectRabbitMQ(url string) (*amqp.Connection, *amqp.Channel) {
 		nil,                  // arguments
 	)
 	if err != nil {
-		log.Fatalf("Failed to declare exchange: %v", err)
+		log.Printf("Failed to declare RabbitMQ exchange; async audit publishing disabled: %v", err)
+		_ = ch.Close()
+		_ = conn.Close()
+		return nil, nil
 	}
 
 	return conn, ch
 }
 
 func PublishTransactionEvent(ch *amqp.Channel, payload EventPayload) {
+	if ch == nil {
+		log.Println("RabbitMQ channel is nil, skipping transaction event publish")
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 

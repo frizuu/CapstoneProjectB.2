@@ -28,7 +28,7 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: bank
     ports:
-      - "5433:5432"
+      - "5434:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
@@ -78,21 +78,21 @@ services:
     image: redis:7
     container_name: redis
     ports:
-      - "6379:6379"
+      - "6380:6379"
     volumes:
       - redis_data:/data
     # Added memory management limits to the command below
     command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
 
   rabbitmq:
-      image: rabbitmq:3-management-alpine
-      container_name: rabbitmq-broker
-      restart: always
-      ports:
-        - "5673:5672"   # AMQP protocol port
-        - "15673:15672" # Management UI port
-      volumes:
-        - rabbitmq_data:/var/lib/rabbitmq
+    image: rabbitmq:3-management-alpine
+    container_name: rabbitmq-broker
+    restart: always
+    ports:
+      - "5672:5672"   # AMQP protocol port
+      - "15674:15672" # Management UI port
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
 
 volumes:
   postgres_data:
