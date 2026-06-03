@@ -1,7 +1,6 @@
 package service
 
 import (
-	"baseline-system/cache"
 	"baseline-system/legacy"
 	"baseline-system/messaging"
 	"baseline-system/model"
@@ -21,7 +20,6 @@ type TransactionService struct {
 	MerchantRepo *repository.MerchantRepo
 	AuditRepo    *repository.AuditRepo
 	LedgerRepo   *repository.LedgerRepo
-	Cache        *cache.RedisCache
 	RabbitMQ     *amqp.Channel
 }
 
@@ -187,6 +185,17 @@ func (s *TransactionService) MerchantInquiry(merchantCode string) MerchantInquir
 	result.Category = merchant.Category
 	result.LegacyLatency = time.Since(start).Milliseconds()
 	result.AuditID = s.recordInquiryAudit(req.Type, merchant.ID, result.Status, result.Message, fmt.Sprintf("merchant_code=%s ref=%s profile=%s", merchantCode, req.ReferenceNo, profile))
+
+	cacheItem := merchantInfoCacheItem{
+		MerchantID:   merchant.ID,
+		MerchantName: merchant.Name,
+		MerchantCode: merchant.MerchantCode,
+		Category:     merchant.Category,
+	}
+	if data, err := json.Marshal(cacheItem); err == nil {
+		SetCache(cacheKey, string(data), defaultCacheTTL)
+	}
+
 	return result
 }
 
