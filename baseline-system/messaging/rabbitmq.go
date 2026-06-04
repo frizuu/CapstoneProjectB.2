@@ -23,9 +23,21 @@ type EventPayload struct {
 }
 
 func ConnectRabbitMQ(url string) (*amqp.Connection, *amqp.Channel) {
-	conn, err := amqp.Dial(url)
+	var conn *amqp.Connection
+	var err error
+
+	for attempt := 1; attempt <= 10; attempt++ {
+		conn, err = amqp.Dial(url)
+		if err == nil {
+			break
+		}
+
+		log.Printf("RabbitMQ unavailable at %s; retrying startup connection (%d/10): %v", url, attempt, err)
+		time.Sleep(3 * time.Second)
+	}
+
 	if err != nil {
-		log.Printf("RabbitMQ unavailable at %s; async audit publishing disabled: %v", url, err)
+		log.Printf("RabbitMQ unavailable after retries; async audit publishing disabled: %v", err)
 		return nil, nil
 	}
 

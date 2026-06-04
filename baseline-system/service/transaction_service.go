@@ -405,6 +405,17 @@ func (s *TransactionService) executeWithMerchantID(req *legacy.TransactionReques
 		return TransactionResult{Status: legacy.StatusSystemBusy, Code: "91", Message: "unable to start transaction"}
 	}
 
+	if existing, err := s.Repo.GetByReferenceNoWithTx(tx, req.ReferenceNo); err == nil {
+		if commitErr := tx.Commit(); commitErr != nil {
+			tx.Rollback()
+			return TransactionResult{Status: legacy.StatusSystemBusy, Code: "91", Message: "failed to complete idempotent transaction path"}
+		}
+		return s.transactionToResult(existing, true)
+	} else if err != sql.ErrNoRows {
+		tx.Rollback()
+		return TransactionResult{Status: legacy.StatusSystemBusy, Code: "96", Message: "failed to check transaction reference"}
+	}
+
 	if result.Status != legacy.StatusSuccess {
 		var transactionID int
 		if result.NeedReversal {
@@ -420,6 +431,7 @@ func (s *TransactionService) executeWithMerchantID(req *legacy.TransactionReques
 			transactionID, err = s.Repo.SaveWithTx(tx, transaction)
 			if err != nil {
 				tx.Rollback()
+				fmt.Printf("failed to persist pending reversal transaction ref=%s: %v\n", req.ReferenceNo, err)
 				return TransactionResult{Status: legacy.StatusFailed, Code: "94", Message: "failed to persist pending reversal transaction"}
 			}
 		}
@@ -504,6 +516,7 @@ func (s *TransactionService) executeWithMerchantID(req *legacy.TransactionReques
 	transactionID, err := s.Repo.SaveWithTx(tx, transaction)
 	if err != nil {
 		tx.Rollback()
+		fmt.Printf("failed to persist transaction ref=%s: %v\n", req.ReferenceNo, err)
 		return TransactionResult{Status: legacy.StatusFailed, Code: "94", Message: "failed to persist transaction"}
 	}
 

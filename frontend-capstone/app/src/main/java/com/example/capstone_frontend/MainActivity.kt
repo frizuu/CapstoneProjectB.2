@@ -1,43 +1,38 @@
 package com.example.capstone_frontend
 
 import android.os.Bundle
-import androidx.appcompat.app.AppCompatActivity
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import java.util.concurrent.TimeUnit
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import com.example.capstone_frontend.data.DummyRepository // assuming you use this to get the user ID
+import com.example.capstone_frontend.data.WebSocketManager
+import com.example.capstone_frontend.navigation.AppNavigation
+import com.example.capstone_frontend.ui.theme.Capstone_FrontendTheme
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : ComponentActivity() {
 
-    private lateinit var webSocket: okhttp3.WebSocket
+    // 1. Declare the WebSocketManager
+    private lateinit var webSocketManager: WebSocketManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
 
-        connectToWebSocket()
-    }
+        // 2. Initialize it with the current User's ID (e.g., User 2)
+        val currentUserId = DummyRepository.getCurrentUserId() // Or just hardcode '2' for testing
+        webSocketManager = WebSocketManager(loggedInUserId = currentUserId)
 
-    private fun connectToWebSocket() {
-        // 1. Build the OkHttpClient (no timeouts for WebSockets)
-        val client = OkHttpClient.Builder()
-            .readTimeout(0, TimeUnit.MILLISECONDS)
-            .build()
+        // 3. Connect it!
+        webSocketManager.connect()
 
-        // 2. Point to the Go server using the Emulator's localhost (10.0.2.2)
-        val request = Request.Builder()
-            .url("ws://10.0.2.2:8080/ws")
-            .build()
-
-        // 3. Connect!
-        val listener = TransactionWebSocketListener()
-        webSocket = client.newWebSocket(request, listener)
+        setContent {
+            Capstone_FrontendTheme {
+                AppNavigation()
+            }
+        }
     }
 
     override fun onDestroy() {
         super.onDestroy()
         // Clean up the connection when the app closes
-        if (::webSocket.isInitialized) {
-            webSocket.close(1000, "Activity Destroyed")
-        }
+        webSocketManager.disconnect()
     }
 }
