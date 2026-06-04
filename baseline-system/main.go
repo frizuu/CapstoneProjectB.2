@@ -1,7 +1,6 @@
 package main
 
 import (
-	"baseline-system/cache"
 	"baseline-system/config"
 	"baseline-system/handler"
 	"baseline-system/messaging"
@@ -37,9 +36,6 @@ func main() {
 
 	db := config.ConnectDB()
 
-	// Koneksi Redis Cache
-	redisCache := cache.NewRedisCache(redisAddr, "", 0)
-
 	// Koneksi RabbitMQ
 	amqpURL := envOrDefault("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/")
 	rabbitConn, rabbitCh := messaging.ConnectRabbitMQ(amqpURL)
@@ -67,7 +63,7 @@ func main() {
 		worker.StartAuditWorker(rabbitCh, auditRepo, wsManager)
 	}
 
-	// Service (sekarang menerima DB, Cache, dan RabbitMQ)
+	// Service
 	svc := &service.TransactionService{
 		DB:           db,
 		Repo:         repo,
@@ -75,7 +71,6 @@ func main() {
 		MerchantRepo: merchantRepo,
 		AuditRepo:    auditRepo,
 		LedgerRepo:   ledgerRepo,
-		Cache:        redisCache,
 		RabbitMQ:     rabbitCh,
 	}
 
