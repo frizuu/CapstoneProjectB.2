@@ -527,6 +527,16 @@ func (s *TransactionService) executeWithMerchantID(req *legacy.TransactionReques
 		return TransactionResult{Status: legacy.StatusSystemBusy, Code: "91", Message: "failed to commit transaction"}
 	}
 
+	InvalidateBalanceCache(user.ID)
+	InvalidateTransactionCache(user.ID)
+	if merchantID > 0 {
+		InvalidateMerchantBalanceCache(merchantID)
+	}
+	if recipient != nil {
+		InvalidateBalanceCache(recipient.ID)
+		InvalidateTransactionCache(recipient.ID)
+	}
+
 	// ---> FIX: Fire Async Audit for successful transaction <---
 	if s.RabbitMQ != nil {
 		go messaging.PublishAuditEvent(s.RabbitMQ, auditPayload)
@@ -702,6 +712,16 @@ func (s *TransactionService) ReverseTransaction(transactionID int, referenceNo s
 	if err := tx.Commit(); err != nil {
 		tx.Rollback()
 		return TransactionResult{Status: legacy.StatusSystemBusy, Code: "91", Message: "failed to commit reversal", TransactionID: original.ID, ReferenceNo: req.ReferenceNo}
+	}
+
+	InvalidateBalanceCache(original.UserID)
+	InvalidateTransactionCache(original.UserID)
+	if original.MerchantID > 0 {
+		InvalidateMerchantBalanceCache(original.MerchantID)
+	}
+	if original.RecipientUserID > 0 {
+		InvalidateBalanceCache(original.RecipientUserID)
+		InvalidateTransactionCache(original.RecipientUserID)
 	}
 
 	return TransactionResult{

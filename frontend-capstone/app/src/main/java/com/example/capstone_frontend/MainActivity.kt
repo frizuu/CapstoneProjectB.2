@@ -1,18 +1,26 @@
 package com.example.capstone_frontend
 
 import android.os.Bundle
-import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import com.example.capstone_frontend.data.DummyRepository
+import com.example.capstone_frontend.navigation.AppNavigation
+import com.example.capstone_frontend.ui.theme.Capstone_FrontendTheme
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.concurrent.TimeUnit
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : ComponentActivity() {
 
     private lateinit var webSocket: okhttp3.WebSocket
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
+        setContent {
+            Capstone_FrontendTheme {
+                AppNavigation()
+            }
+        }
 
         connectToWebSocket()
     }
@@ -23,12 +31,12 @@ class MainActivity : AppCompatActivity() {
             .readTimeout(0, TimeUnit.MILLISECONDS)
             .build()
 
-        // 2. Point to the Go server using the Emulator's localhost (10.0.2.2)
+        val currentUserId = DummyRepository.getCurrentUserId()
+
         val request = Request.Builder()
-            .url("ws://10.0.2.2:8080/ws")
+            .url("ws://${Constants.SERVER_IP_AND_PORT}/ws?user_id=$currentUserId")
             .build()
 
-        // 3. Connect!
         val listener = TransactionWebSocketListener()
         webSocket = client.newWebSocket(request, listener)
     }

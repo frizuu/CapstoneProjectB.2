@@ -3,6 +3,7 @@ package handler
 import (
 	"log"
 	"net/http"
+	"strconv"
 	"sync"
 
 	"github.com/gorilla/websocket"
@@ -41,10 +42,12 @@ func (m *WSManager) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// For versatility, you would extract the user_id from a token or URL parameter here.
-	// Example: userID := extractUserIDFromToken(r)
-	// For now, let's hardcode user 3 for testing.
-	userID := 3
+	userID, err := strconv.Atoi(r.URL.Query().Get("user_id"))
+	if err != nil || userID <= 0 {
+		log.Println("WebSocket rejected: user_id query parameter is required")
+		conn.Close()
+		return
+	}
 
 	// Safely add the connection to our map
 	m.mu.Lock()
