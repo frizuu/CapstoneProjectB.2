@@ -113,7 +113,7 @@ fun AppNavigation() {
                     navController.navigate("notifications")
                 },
                 onHelpClick = {
-                    navController.navigate("status")
+                    navController.navigate("help")
                 },
                 onLogout = {
                     navController.navigate("landing") {
@@ -177,15 +177,14 @@ fun AppNavigation() {
                         try {
                             val currentUserId = DummyRepository.getCurrentUserId()
                             val merchantCode = DummyRepository.getCurrentMerchantCode()
-                            val referenceNo = DummyRepository.buildIdempotencyKey()
 
                             val paymentResponse = RetrofitClient.api.qrisPayment(
-                                idempotencyKey = referenceNo,
+                                idempotencyKey = DummyRepository.buildIdempotencyKey(),
                                 request = QrisPaymentRequest(
                                     userId = currentUserId,
                                     merchantCode = merchantCode,
                                     amount = amount,
-                                    referenceNo = referenceNo
+                                    referenceNo = DummyRepository.buildIdempotencyKey()
                                 )
                             )
 

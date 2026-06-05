@@ -44,7 +44,6 @@ import com.example.capstone_frontend.model.NotificationType
 import com.example.capstone_frontend.model.TransactionData
 import java.text.SimpleDateFormat
 import java.util.Locale
-import kotlinx.coroutines.delay
 
 @Composable
 fun NotificationScreen(
@@ -73,8 +72,9 @@ fun NotificationScreen(
 
     val currentUserId = DummyRepository.getCurrentUserId()
 
-    suspend fun refreshNotifications() {
+    LaunchedEffect(currentUserId) {
         try {
+            isLoading = true
             errorMessage = ""
 
             try {
@@ -118,19 +118,12 @@ fun NotificationScreen(
                 }
                 .sumOf { it.amount }
         } catch (e: Exception) {
+            notifications = emptyList()
+            totalIn = 0
+            totalOut = 0
             errorMessage = e.message ?: "Notifikasi belum dapat dimuat."
         } finally {
             isLoading = false
-        }
-    }
-
-    LaunchedEffect(currentUserId) {
-        isLoading = true
-        refreshNotifications()
-
-        while (true) {
-            delay(5000)
-            refreshNotifications()
         }
     }
 
@@ -166,7 +159,7 @@ fun NotificationScreen(
                     )
 
                     Text(
-                        text = "Aktivitas uang masuk, keluar, QRIS, refund, dan transaksi gagal.",
+                        text = "Aktivitas uang masuk, keluar, QRIS, transfer, dan transaksi baseline.",
                         style = MaterialTheme.typography.bodySmall,
                         color = AppColor.TextGray
                     )
@@ -217,7 +210,7 @@ fun NotificationScreen(
                 }
             }
 
-            errorMessage.isNotBlank() && notifications.isEmpty() -> {
+            errorMessage.isNotBlank() -> {
                 item {
                     Text(
                         text = "Notifikasi belum dapat dimuat.",
@@ -393,7 +386,7 @@ fun NotificationItem(
                         color = AppColor.TextDark
                     )
 
-                    if (notification.status.uppercase() != "SUCCESS") {
+                    if (notification.status != "SUCCESS") {
                         Spacer(modifier = Modifier.padding(start = 6.dp))
 
                         Text(
@@ -516,13 +509,12 @@ private fun TransactionData.toNotificationData(
     currentUserId: Int
 ): NotificationData {
     val type = normalizeNotificationTransactionType(transactionType)
-    val statusUpper = status.uppercase()
 
     val isIncomingTransfer = type == "TRANSFER" &&
             recipientUserId == currentUserId &&
             userId.toIntOrNull() != currentUserId
 
-    val isFailed = statusUpper != "SUCCESS"
+    val isFailed = status.uppercase() != "SUCCESS"
 
     val notificationType = when {
         isFailed && type == "TRANSFER" -> NotificationType.TRANSFER_FAILED
@@ -536,7 +528,7 @@ private fun TransactionData.toNotificationData(
 
     val title = when (notificationType) {
         NotificationType.INCOMING_TRANSFER -> "Transfer Masuk"
-        NotificationType.OUTGOING_TRANSFER -> "Realtime Transfer"
+        NotificationType.OUTGOING_TRANSFER -> "Transfer Keluar"
         NotificationType.QRIS_SUCCESS -> "QRIS Payment Successful"
         NotificationType.QRIS_FAILED -> "QRIS Payment Failed"
         NotificationType.TRANSFER_FAILED -> "Transfer Failed"
@@ -550,11 +542,11 @@ private fun TransactionData.toNotificationData(
         }
 
         NotificationType.OUTGOING_TRANSFER -> {
-            "Kamu baru melakukan transfer senilai ${formatRupiah(amount)} kepada ${safeNotificationRecipientName(this)}."
+            "Transfer ${formatRupiah(amount)} ke ${safeNotificationRecipientName(this)}."
         }
 
         NotificationType.QRIS_SUCCESS -> {
-            "Payment of ${formatRupiah(amount)} settled at ${safeNotificationMerchantName(this)}. Ref: ${referenceNo ?: transactionId}."
+            "Pembayaran ${formatRupiah(amount)} berhasil ke ${safeNotificationMerchantName(this)}."
         }
 
         NotificationType.QRIS_FAILED -> {
@@ -562,11 +554,11 @@ private fun TransactionData.toNotificationData(
         }
 
         NotificationType.TRANSFER_FAILED -> {
-            "Transfer to ${safeNotificationRecipientName(this)} could not be completed. No funds were deducted."
+            "Transfer ke ${safeNotificationRecipientName(this)} gagal. Dana tidak terpotong."
         }
 
         NotificationType.REFUND -> {
-            "Refund Processed: ${formatRupiah(amount)} has been returned to your balance."
+            "Refund ${formatRupiah(amount)} berhasil dikembalikan ke saldo."
         }
 
         NotificationType.INFO -> {

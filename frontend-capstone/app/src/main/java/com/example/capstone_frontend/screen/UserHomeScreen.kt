@@ -50,7 +50,6 @@ import com.example.capstone_frontend.data.DummyRepository
 import com.example.capstone_frontend.data.NotificationReadStore
 import com.example.capstone_frontend.data.RetrofitClient
 import com.example.capstone_frontend.model.TransactionData
-import kotlinx.coroutines.delay
 
 @Composable
 fun UserHomeScreen(
@@ -104,11 +103,13 @@ fun UserHomeScreen(
     val currentUserName = DummyRepository.getCurrentUserFirstName()
     val currentUserId = DummyRepository.getCurrentUserId()
 
-    suspend fun refreshHomeData(
-        showPopupIfNew: Boolean
-    ) {
+    LaunchedEffect(currentUserId) {
         try {
+            isBalanceLoaded = false
+            balanceError = ""
+
             val response = RetrofitClient.api.getBalance(currentUserId)
+
             balance = response.balance
             isBalanceLoaded = true
             balanceError = ""
@@ -116,7 +117,9 @@ fun UserHomeScreen(
             isBalanceLoaded = false
             balanceError = e.message ?: e.toString()
         }
+    }
 
+    LaunchedEffect(currentUserId) {
         try {
             try {
                 val merchantResponse = RetrofitClient.api.getMerchants()
@@ -135,44 +138,36 @@ fun UserHomeScreen(
                 transactions = convertedTransactions
             )
 
-            if (showPopupIfNew) {
-                val latestNotificationTransaction = convertedTransactions.firstOrNull { transaction ->
-                    NotificationReadStore.shouldCountAsNotification(
-                        transaction = transaction,
-                        currentUserId = currentUserId
-                    ) && !NotificationReadStore.hasShownPopup(
+            val latestNotificationTransaction = convertedTransactions.firstOrNull { transaction ->
+                NotificationReadStore.shouldCountAsNotification(
+                    transaction = transaction,
+                    currentUserId = currentUserId
+                )
+            }
+
+            if (latestNotificationTransaction != null) {
+                val notification = buildHomeTopNotification(
+                    transaction = latestNotificationTransaction,
+                    currentUserId = currentUserId
+                )
+
+                if (
+                    notification != null &&
+                    !NotificationReadStore.hasShownPopup(
                         userId = currentUserId,
-                        transactionId = transaction.transactionId
+                        transactionId = latestNotificationTransaction.transactionId
                     )
-                }
+                ) {
+                    topNotificationData = notification
+                    showTopNotification = true
 
-                if (latestNotificationTransaction != null) {
-                    val notification = buildHomeTopNotification(
-                        transaction = latestNotificationTransaction,
-                        currentUserId = currentUserId
+                    NotificationReadStore.markPopupShown(
+                        userId = currentUserId,
+                        transactionId = latestNotificationTransaction.transactionId
                     )
-
-                    if (notification != null) {
-                        topNotificationData = notification
-                        showTopNotification = true
-
-                        NotificationReadStore.markPopupShown(
-                            userId = currentUserId,
-                            transactionId = latestNotificationTransaction.transactionId
-                        )
-                    }
                 }
             }
         } catch (_: Exception) {
-        }
-    }
-
-    LaunchedEffect(currentUserId) {
-        refreshHomeData(showPopupIfNew = true)
-
-        while (true) {
-            delay(5000)
-            refreshHomeData(showPopupIfNew = true)
         }
     }
 
@@ -214,6 +209,12 @@ fun UserHomeScreen(
                     NotificationBellButton(
                         unreadCount = unreadNotificationCount,
                         onClick = {
+                            /*
+                             * Penting:
+                             * Klik lonceng hanya membuka halaman notifikasi.
+                             * Jangan langsung mark semua sebagai sudah dibaca.
+                             * Notif baru dianggap dibaca setelah user klik item notifikasinya.
+                             */
                             onNotificationClick()
                         }
                     )
@@ -368,12 +369,6 @@ fun UserHomeScreen(
                             label = "Riwayat",
                             onClick = onHistoryClick
                         )
-
-                        HomeMenuItemV2(
-                            iconText = "✓",
-                            label = "Status",
-                            onClick = onHelpClick
-                        )
                     }
                 }
 
@@ -454,6 +449,10 @@ fun UserHomeScreen(
                 topNotificationData = null
             },
             onActionClick = {
+                /*
+                 * Klik "Lihat Notifikasi" juga hanya membuka halaman notifikasi.
+                 * Tidak langsung menghapus semua badge.
+                 */
                 onNotificationClick()
             }
         )
@@ -643,20 +642,19 @@ private fun buildHomeTopNotification(
     transaction: TransactionData,
     currentUserId: Int
 ): TopNotificationUiState? {
-    val type = transaction.transactionType.trim().uppercase()
-    val status = transaction.status.trim().uppercase()
+    val type = transaction.transactionType.uppercase()
 
     val isIncomingTransfer = type == "TRANSFER" &&
             transaction.recipientUserId == currentUserId &&
             transaction.userId.toIntOrNull() != currentUserId
 
-    val isFailed = status != "SUCCESS"
+    val isFailed = transaction.status.uppercase() != "SUCCESS"
 
     return when {
         isFailed && type == "TRANSFER" -> {
             TopNotificationUiState(
                 title = "Transfer Gagal",
-                message = "Transfer ke ${transaction.recipientUserName ?: transaction.merchantName} gagal diproses. Dana tidak terpotong.",
+                message = "Transfer ke ${transaction.recipientUserName ?: transaction.merchantName} gagal diproses.",
                 type = TopNotificationType.ERROR,
                 actionLabel = "Lihat Notifikasi"
             )
@@ -694,15 +692,6 @@ private fun buildHomeTopNotification(
                 title = "Pembayaran QRIS Berhasil",
                 message = "Pembayaran ${formatRupiah(transaction.amount)} ke ${transaction.merchantName} berhasil.",
                 type = TopNotificationType.INFO,
-                actionLabel = "Lihat Notifikasi"
-            )
-        }
-
-        type == "REFUND" -> {
-            TopNotificationUiState(
-                title = "Refund Diproses",
-                message = "Refund ${formatRupiah(transaction.amount)} telah dikembalikan ke saldo.",
-                type = TopNotificationType.SUCCESS,
                 actionLabel = "Lihat Notifikasi"
             )
         }

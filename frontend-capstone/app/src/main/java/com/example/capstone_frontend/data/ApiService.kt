@@ -1,6 +1,5 @@
 package com.example.capstone_frontend.data
 
-import okhttp3.ResponseBody
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.Header
@@ -45,7 +44,4 @@ interface ApiService {
     suspend fun getTransactions(
         @Query("user_id") userId: Int
     ): TransactionHistoryResponse
-
-    @GET("metrics")
-    suspend fun getMetrics(): ResponseBody
 }

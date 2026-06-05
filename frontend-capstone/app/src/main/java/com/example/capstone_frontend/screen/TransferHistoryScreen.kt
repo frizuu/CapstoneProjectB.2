@@ -20,12 +20,9 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -46,9 +43,7 @@ import com.example.capstone_frontend.data.RetrofitClient
 import com.example.capstone_frontend.model.TransactionData
 import java.text.SimpleDateFormat
 import java.util.Locale
-import kotlinx.coroutines.delay
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TransferHistoryScreen(
     onBack: () -> Unit,
@@ -78,34 +73,11 @@ fun TransferHistoryScreen(
         mutableIntStateOf(0)
     }
 
-    var selectedDateFilter by remember {
-        mutableStateOf("30 Hari Terakhir")
-    }
-
-    var selectedTypeFilter by remember {
-        mutableStateOf("Semua Transaksi")
-    }
-
-    var showDateSheet by remember {
-        mutableStateOf(false)
-    }
-
-    var showTypeSheet by remember {
-        mutableStateOf(false)
-    }
-
-    val dateSheetState = rememberModalBottomSheetState(
-        skipPartiallyExpanded = true
-    )
-
-    val typeSheetState = rememberModalBottomSheetState(
-        skipPartiallyExpanded = true
-    )
-
     val currentUserId = DummyRepository.getCurrentUserId()
 
-    suspend fun refreshHistory() {
+    LaunchedEffect(currentUserId) {
         try {
+            isLoading = true
             errorMessage = ""
 
             try {
@@ -120,289 +92,186 @@ fun TransferHistoryScreen(
             DummyRepository.setBackendTransactions(converted)
 
             transactions = converted
+
+            totalOut = converted
+                .filter { isOutgoingForCurrentUser(it, currentUserId) }
+                .sumOf { it.amount }
+
+            totalIn = converted
+                .filter { isIncomingTransfer(it, currentUserId) }
+                .sumOf { it.amount }
         } catch (e: Exception) {
+            transactions = emptyList()
+            totalOut = 0
+            totalIn = 0
             errorMessage = e.message ?: "Riwayat transaksi belum dapat dimuat."
         } finally {
             isLoading = false
         }
     }
 
-    LaunchedEffect(currentUserId) {
-        isLoading = true
-        refreshHistory()
-
-        while (true) {
-            delay(5000)
-            refreshHistory()
-        }
+    val filteredTransactions = transactions.filter {
+        showTransaction
     }
 
-    val filteredTransactions = transactions
-        .filter {
-            showTransaction
-        }
-        .filter { transaction ->
-            filterHistoryByDateV2(
-                transaction = transaction,
-                selectedDateFilter = selectedDateFilter
-            )
-        }
-        .filter { transaction ->
-            filterHistoryByTypeV2(
-                transaction = transaction,
-                selectedTypeFilter = selectedTypeFilter,
-                currentUserId = currentUserId
-            )
-        }
-
-    LaunchedEffect(filteredTransactions, currentUserId) {
-        totalOut = filteredTransactions
-            .filter { isOutgoingForCurrentUserV2(it, currentUserId) }
-            .sumOf { it.amount }
-
-        totalIn = filteredTransactions
-            .filter { isIncomingForCurrentUserV2(it, currentUserId) || isRefundTransactionV2(it) }
-            .sumOf { it.amount }
-    }
-
-    Box(
-        modifier = Modifier.fillMaxSize()
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(AppColor.Background)
+            .padding(horizontal = 18.dp)
     ) {
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(AppColor.Background)
-                .padding(horizontal = 18.dp)
-        ) {
-            item {
-                Spacer(modifier = Modifier.height(32.dp))
+        item {
+            Spacer(modifier = Modifier.height(32.dp))
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TextButton(
+                    onClick = onBack
                 ) {
-                    TextButton(
-                        onClick = onBack
-                    ) {
-                        Text(
-                            text = "←",
-                            color = AppColor.Primary,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
                     Text(
-                        text = "Riwayat Transaksi",
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = AppColor.TextDark
+                        text = "←",
+                        color = AppColor.Primary,
+                        fontWeight = FontWeight.Bold
                     )
                 }
 
-                Spacer(modifier = Modifier.height(22.dp))
+                Text(
+                    text = "Riwayat Transaksi",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = AppColor.TextDark
+                )
+            }
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+            Spacer(modifier = Modifier.height(22.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                HistoryFilterChipV2(
+                    text = "30 Hari Terakhir⌄",
+                    modifier = Modifier.weight(1f)
+                )
+
+                HistoryFilterChipV2(
+                    text = "Semua Transaksi⌄",
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Checkbox(
+                    checked = showTransaction,
+                    onCheckedChange = {
+                        showTransaction = it
+                    },
+                    colors = CheckboxDefaults.colors(
+                        checkedColor = AppColor.Primary
+                    )
+                )
+
+                Text(
+                    text = "Tampilkan transaksi QRIS, transfer, dan baseline",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = AppColor.TextDark
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Top
+            ) {
+                Text(
+                    text = "Riwayat",
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = AppColor.TextDark
+                )
+
+                Column(
+                    horizontalAlignment = Alignment.End
                 ) {
-                    HistoryFilterChipV2(
-                        text = "$selectedDateFilter⌄",
-                        modifier = Modifier.weight(1f),
-                        onClick = {
-                            showDateSheet = true
-                        }
+                    Text(
+                        text = "Saldo keluar: ${formatRupiah(totalOut)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = AppColor.TextGray
                     )
 
-                    HistoryFilterChipV2(
-                        text = "$selectedTypeFilter⌄",
-                        modifier = Modifier.weight(1f),
-                        onClick = {
-                            showTypeSheet = true
-                        }
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Checkbox(
-                        checked = showTransaction,
-                        onCheckedChange = {
-                            showTransaction = it
-                        },
-                        colors = CheckboxDefaults.colors(
-                            checkedColor = AppColor.Primary
-                        )
-                    )
+                    Spacer(modifier = Modifier.height(3.dp))
 
                     Text(
-                        text = "Tampilkan transaksi QRIS, transfer, dan pengembalian dana",
+                        text = "Saldo masuk: ${formatRupiah(totalIn)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = AppColor.TextGray
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(18.dp))
+        }
+
+        when {
+            isLoading -> {
+                item {
+                    Text(
+                        text = "Memuat riwayat transaksi...",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = AppColor.TextDark
+                        color = AppColor.TextGray
                     )
                 }
+            }
 
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.Top
-                ) {
+            errorMessage.isNotBlank() -> {
+                item {
                     Text(
-                        text = "Riwayat",
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = AppColor.TextDark
+                        text = "Riwayat transaksi belum dapat dimuat.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = AppColor.TextGray
                     )
 
-                    Column(
-                        horizontalAlignment = Alignment.End
-                    ) {
-                        Text(
-                            text = "Saldo keluar: ${formatRupiah(totalOut)}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = AppColor.TextGray
-                        )
+                    Spacer(modifier = Modifier.height(10.dp))
 
-                        Spacer(modifier = Modifier.height(3.dp))
-
-                        Text(
-                            text = "Saldo masuk: ${formatRupiah(totalIn)}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = AppColor.TextGray
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(18.dp))
-            }
-
-            when {
-                isLoading -> {
-                    item {
-                        Text(
-                            text = "Memuat riwayat transaksi...",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = AppColor.TextGray
-                        )
-                    }
-                }
-
-                errorMessage.isNotBlank() && filteredTransactions.isEmpty() -> {
-                    item {
-                        Text(
-                            text = "Riwayat transaksi belum dapat dimuat.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = AppColor.TextGray
-                        )
-
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        Text(
-                            text = errorMessage,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color(0xFFC62828)
-                        )
-                    }
-                }
-
-                filteredTransactions.isEmpty() -> {
-                    item {
-                        Text(
-                            text = "Belum ada transaksi sesuai filter.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = AppColor.TextGray
-                        )
-                    }
-                }
-
-                else -> {
-                    items(filteredTransactions) { transaction ->
-                        HistoryItemV2(
-                            transaction = transaction,
-                            currentUserId = currentUserId,
-                            onClick = {
-                                onTransactionClick(transaction.transactionId)
-                            }
-                        )
-
-                        Spacer(modifier = Modifier.height(16.dp))
-                    }
+                    Text(
+                        text = errorMessage,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFFC62828)
+                    )
                 }
             }
-        }
 
-        if (showDateSheet) {
-            ModalBottomSheet(
-                onDismissRequest = {
-                    showDateSheet = false
-                },
-                sheetState = dateSheetState,
-                containerColor = Color.White,
-                shape = RoundedCornerShape(
-                    topStart = 18.dp,
-                    topEnd = 18.dp
-                )
-            ) {
-                HistorySelectionSheetV2(
-                    title = "Pilih Tanggal",
-                    description = "Silakan pilih periode riwayat transaksi yang ingin ditampilkan.",
-                    options = listOf(
-                        "1 Tahun Terakhir",
-                        "30 Hari Terakhir",
-                        "7 Hari Terakhir",
-                        "Semua Waktu"
-                    ),
-                    selectedOption = selectedDateFilter,
-                    onClose = {
-                        showDateSheet = false
-                    },
-                    onOptionSelected = { selected ->
-                        selectedDateFilter = selected
-                        showDateSheet = false
-                    }
-                )
+            filteredTransactions.isEmpty() -> {
+                item {
+                    Text(
+                        text = "Belum ada transaksi.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = AppColor.TextGray
+                    )
+                }
             }
-        }
 
-        if (showTypeSheet) {
-            ModalBottomSheet(
-                onDismissRequest = {
-                    showTypeSheet = false
-                },
-                sheetState = typeSheetState,
-                containerColor = Color.White,
-                shape = RoundedCornerShape(
-                    topStart = 18.dp,
-                    topEnd = 18.dp
-                )
-            ) {
-                HistorySelectionSheetV2(
-                    title = "Pilih Jenis",
-                    description = "Pilih jenis transaksi yang ingin ditampilkan di riwayat.",
-                    options = listOf(
-                        "Semua Transaksi",
-                        "Saldo Masuk",
-                        "Saldo Keluar",
-                        "Pembayaran QRIS",
-                        "Transfer Masuk",
-                        "Transfer Keluar",
-                        "Pengembalian Dana",
-                        "Transaksi Gagal"
-                    ),
-                    selectedOption = selectedTypeFilter,
-                    onClose = {
-                        showTypeSheet = false
-                    },
-                    onOptionSelected = { selected ->
-                        selectedTypeFilter = selected
-                        showTypeSheet = false
-                    }
-                )
+            else -> {
+                items(filteredTransactions) { transaction ->
+                    HistoryItemV2(
+                        transaction = transaction,
+                        currentUserId = currentUserId,
+                        onClick = {
+                            onTransactionClick(transaction.transactionId)
+                        }
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
             }
         }
     }
@@ -411,15 +280,10 @@ fun TransferHistoryScreen(
 @Composable
 fun HistoryFilterChipV2(
     text: String,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit
+    modifier: Modifier = Modifier
 ) {
     Card(
-        modifier = modifier
-            .height(46.dp)
-            .clickable {
-                onClick()
-            },
+        modifier = modifier.height(46.dp),
         shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
         elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
@@ -440,141 +304,29 @@ fun HistoryFilterChipV2(
 }
 
 @Composable
-private fun HistorySelectionSheetV2(
-    title: String,
-    description: String,
-    options: List<String>,
-    selectedOption: String,
-    onClose: () -> Unit,
-    onOptionSelected: (String) -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Color.White)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 18.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = title,
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color = AppColor.TextDark
-            )
-
-            Text(
-                text = "×",
-                modifier = Modifier.clickable {
-                    onClose()
-                },
-                style = MaterialTheme.typography.headlineSmall,
-                color = AppColor.TextGray,
-                textAlign = TextAlign.Center
-            )
-        }
-
-        Spacer(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(1.dp)
-                .background(Color(0xFFEDEDED))
-        )
-
-        Spacer(modifier = Modifier.height(18.dp))
-
-        Text(
-            text = description,
-            modifier = Modifier.padding(horizontal = 18.dp),
-            style = MaterialTheme.typography.bodySmall,
-            color = AppColor.TextGray
-        )
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        options.forEach { option ->
-            HistorySheetOptionV2(
-                text = option,
-                selected = option == selectedOption,
-                onClick = {
-                    onOptionSelected(option)
-                }
-            )
-        }
-
-        Spacer(modifier = Modifier.height(26.dp))
-    }
-}
-
-@Composable
-private fun HistorySheetOptionV2(
-    text: String,
-    selected: Boolean,
-    onClick: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(52.dp)
-            .clickable {
-                onClick()
-            }
-            .padding(horizontal = 18.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = text,
-            modifier = Modifier.weight(1f),
-            style = MaterialTheme.typography.bodyLarge,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-            color = AppColor.TextDark
-        )
-
-        if (selected) {
-            Text(
-                text = "✓",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFFFF6A00)
-            )
-        }
-    }
-}
-
-@Composable
 fun HistoryItemV2(
     transaction: TransactionData,
     currentUserId: Int,
     onClick: () -> Unit
 ) {
-    val type = normalizeHistoryTransactionTypeV2(transaction)
-    val isIncoming = isIncomingForCurrentUserV2(transaction, currentUserId)
-    val isRefund = isRefundTransactionV2(transaction)
-    val isFailed = transaction.status.uppercase() != "SUCCESS"
+    val type = normalizeTransactionType(transaction)
+    val isIncoming = isIncomingTransfer(transaction, currentUserId)
 
     val title = when {
         type == "QRIS" -> {
-            "Bayar QRIS ke ${safeHistoryMerchantNameV2(transaction)}"
+            "Bayar QRIS ke ${safeMerchantName(transaction)}"
         }
 
         type == "TRANSFER" && isIncoming -> {
-            "Terima uang dari ${safeHistorySenderNameV2(transaction)}"
+            "Terima uang dari ${safeSenderName(transaction)}"
         }
 
         type == "TRANSFER" -> {
-            "Transfer ke ${safeHistoryRecipientNameV2(transaction)}"
-        }
-
-        isRefund -> {
-            "Pengembalian Dana"
+            "Transfer ke ${safeRecipientName(transaction)}"
         }
 
         else -> {
-            "Transaksi"
+            "Transaksi Baseline"
         }
     }
 
@@ -582,33 +334,29 @@ fun HistoryItemV2(
         type == "QRIS" -> "Pembayaran QRIS"
         type == "TRANSFER" && isIncoming -> "Transfer masuk"
         type == "TRANSFER" -> "Transfer keluar"
-        isRefund -> "Dana dikembalikan ke saldo"
-        else -> "Aktivitas transaksi"
+        else -> "Aktivitas awal dari data baseline"
     }
 
-    val amountText = if (isIncoming || isRefund) {
+    val amountText = if (isIncoming) {
         "+${formatRupiah(transaction.amount)}"
     } else {
         "-${formatRupiah(transaction.amount)}"
     }
 
-    val iconText = when {
-        type == "QRIS" -> "QR"
-        type == "TRANSFER" -> "TF"
-        isRefund -> "RF"
-        else -> "TR"
+    val iconText = when (type) {
+        "QRIS" -> "QR"
+        "TRANSFER" -> "TF"
+        else -> "BL"
     }
 
     val iconBackground = when {
-        isFailed -> Color(0xFFFFEBEE)
-        isIncoming || isRefund -> Color(0xFFE8F5E9)
+        isIncoming -> Color(0xFFE8F5E9)
+        type == "BASELINE" -> Color(0xFFE3F2FD)
         else -> Color(0xFFFFF3E0)
     }
 
-    val amountColor = if (isIncoming || isRefund) {
+    val amountColor = if (isIncoming) {
         Color(0xFF008A3D)
-    } else if (isFailed) {
-        Color(0xFFC62828)
     } else {
         AppColor.TextDark
     }
@@ -633,7 +381,7 @@ fun HistoryItemV2(
         ) {
             Text(
                 text = iconText,
-                color = if (isFailed) Color(0xFFC62828) else AppColor.Primary,
+                color = AppColor.Primary,
                 fontWeight = FontWeight.Bold,
                 style = MaterialTheme.typography.bodyMedium
             )
@@ -681,7 +429,7 @@ fun HistoryItemV2(
             Spacer(modifier = Modifier.height(4.dp))
 
             Text(
-                text = formatHistoryStatusTextV2(transaction.status),
+                text = formatStatusText(transaction.status),
                 style = MaterialTheme.typography.bodySmall,
                 fontWeight = FontWeight.Bold,
                 color = if (transaction.status.uppercase() == "SUCCESS") {
@@ -694,91 +442,30 @@ fun HistoryItemV2(
     }
 }
 
-private fun filterHistoryByDateV2(
-    transaction: TransactionData,
-    selectedDateFilter: String
-): Boolean {
-    if (selectedDateFilter == "Semua Waktu") {
-        return true
-    }
-
-    val transactionMillis = parseHistoryTimeMillisV2(transaction.createdAt)
-
-    if (transactionMillis == 0L) {
-        return true
-    }
-
-    val now = System.currentTimeMillis()
-
-    val maxAgeMillis = when (selectedDateFilter) {
-        "7 Hari Terakhir" -> 7L * 24L * 60L * 60L * 1000L
-        "30 Hari Terakhir" -> 30L * 24L * 60L * 60L * 1000L
-        "1 Tahun Terakhir" -> 365L * 24L * 60L * 60L * 1000L
-        else -> 30L * 24L * 60L * 60L * 1000L
-    }
-
-    return now - transactionMillis <= maxAgeMillis
-}
-
-private fun filterHistoryByTypeV2(
-    transaction: TransactionData,
-    selectedTypeFilter: String,
-    currentUserId: Int
-): Boolean {
-    val type = normalizeHistoryTransactionTypeV2(transaction)
-    val isIncoming = isIncomingForCurrentUserV2(transaction, currentUserId)
-    val isOutgoing = isOutgoingForCurrentUserV2(transaction, currentUserId)
-    val isRefund = isRefundTransactionV2(transaction)
-    val isFailed = transaction.status.uppercase() != "SUCCESS"
-
-    return when (selectedTypeFilter) {
-        "Semua Transaksi" -> true
-        "Saldo Masuk" -> isIncoming || isRefund
-        "Saldo Keluar" -> isOutgoing
-        "Pembayaran QRIS" -> type == "QRIS"
-        "Transfer Masuk" -> type == "TRANSFER" && isIncoming
-        "Transfer Keluar" -> type == "TRANSFER" && isOutgoing
-        "Pengembalian Dana" -> isRefund
-        "Transaksi Gagal" -> isFailed
-        else -> true
-    }
-}
-
-private fun isIncomingForCurrentUserV2(
+private fun isIncomingTransfer(
     transaction: TransactionData,
     currentUserId: Int
 ): Boolean {
-    return normalizeHistoryTransactionTypeV2(transaction) == "TRANSFER" &&
+    return normalizeTransactionType(transaction) == "TRANSFER" &&
             transaction.recipientUserId == currentUserId &&
             transaction.userId.toIntOrNull() != currentUserId
 }
 
-private fun isOutgoingForCurrentUserV2(
+private fun isOutgoingForCurrentUser(
     transaction: TransactionData,
     currentUserId: Int
 ): Boolean {
-    val type = normalizeHistoryTransactionTypeV2(transaction)
+    val type = normalizeTransactionType(transaction)
 
-    return when {
-        isRefundTransactionV2(transaction) -> false
-        type == "TRANSFER" -> transaction.userId.toIntOrNull() == currentUserId
-        type == "QRIS" -> transaction.userId.toIntOrNull() == currentUserId
+    return when (type) {
+        "TRANSFER" -> transaction.userId.toIntOrNull() == currentUserId
+        "QRIS" -> transaction.userId.toIntOrNull() == currentUserId
+        "BASELINE" -> transaction.userId.toIntOrNull() == currentUserId
         else -> transaction.userId.toIntOrNull() == currentUserId
     }
 }
 
-private fun isRefundTransactionV2(
-    transaction: TransactionData
-): Boolean {
-    val type = transaction.transactionType.trim().uppercase()
-    val direction = transaction.direction.trim().uppercase()
-
-    return type == "REFUND" ||
-            direction == "REFUND" ||
-            transaction.merchantName.contains("refund", ignoreCase = true)
-}
-
-private fun normalizeHistoryTransactionTypeV2(
+private fun normalizeTransactionType(
     transaction: TransactionData
 ): String {
     val rawType = transaction.transactionType.trim().uppercase()
@@ -787,11 +474,11 @@ private fun normalizeHistoryTransactionTypeV2(
         rawType == "QRIS" -> "QRIS"
         rawType == "TRANSFER" -> "TRANSFER"
         rawType == "REFUND" -> "REFUND"
-        else -> "TRANSACTION"
+        else -> "BASELINE"
     }
 }
 
-private fun safeHistoryMerchantNameV2(
+private fun safeMerchantName(
     transaction: TransactionData
 ): String {
     return transaction.merchantName
@@ -799,7 +486,7 @@ private fun safeHistoryMerchantNameV2(
         ?: "Merchant"
 }
 
-private fun safeHistoryRecipientNameV2(
+private fun safeRecipientName(
     transaction: TransactionData
 ): String {
     return transaction.recipientUserName
@@ -808,7 +495,7 @@ private fun safeHistoryRecipientNameV2(
         ?: "Penerima"
 }
 
-private fun safeHistorySenderNameV2(
+private fun safeSenderName(
     transaction: TransactionData
 ): String {
     return transaction.senderName
@@ -816,7 +503,7 @@ private fun safeHistorySenderNameV2(
         ?: "Pengirim"
 }
 
-private fun formatHistoryStatusTextV2(
+private fun formatStatusText(
     status: String
 ): String {
     return when (status.uppercase()) {
@@ -851,29 +538,4 @@ private fun formatHistoryTimeV2(
     }
 
     return rawDate
-}
-
-private fun parseHistoryTimeMillisV2(
-    rawDate: String
-): Long {
-    val possibleFormats = listOf(
-        "yyyy-MM-dd HH:mm:ss",
-        "yyyy-MM-dd HH:mm",
-        "yyyy-MM-dd'T'HH:mm:ss'Z'",
-        "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
-    )
-
-    for (format in possibleFormats) {
-        try {
-            val parser = SimpleDateFormat(format, Locale.US)
-            val date = parser.parse(rawDate)
-
-            if (date != null) {
-                return date.time
-            }
-        } catch (_: Exception) {
-        }
-    }
-
-    return 0L
 }
