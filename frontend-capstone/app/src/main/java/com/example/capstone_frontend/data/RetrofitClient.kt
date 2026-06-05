@@ -1,5 +1,6 @@
 package com.example.capstone_frontend.data
 
+import com.example.capstone_frontend.Constants
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -7,7 +8,7 @@ import java.util.concurrent.TimeUnit
 
 object RetrofitClient {
 
-    private const val BASE_URL = "http://127.0.0.1:8080/"
+    private val BASE_URL = "http://${Constants.SERVER_IP_AND_PORT}/"
 
     private val okHttpClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
