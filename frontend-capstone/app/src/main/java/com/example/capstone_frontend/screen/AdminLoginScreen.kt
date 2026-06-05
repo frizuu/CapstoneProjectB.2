@@ -27,6 +27,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -42,12 +43,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.capstone_frontend.component.AppColor
 import com.example.capstone_frontend.component.formatRupiah
+import com.example.capstone_frontend.data.BaselineMetricsParser
 import com.example.capstone_frontend.data.DummyRepository
 import com.example.capstone_frontend.data.RetrofitClient
 import com.example.capstone_frontend.model.TransactionData
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.Locale
+import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
 private const val BASELINE_USER_COUNT = 100
@@ -254,6 +257,10 @@ fun AdminDashboardScreenV2(
         mutableStateOf("")
     }
 
+    var metricsErrorMessage by remember {
+        mutableStateOf("")
+    }
+
     var allMerchants by remember {
         mutableStateOf<List<AdminMerchantUiV2>>(emptyList())
     }
@@ -306,13 +313,32 @@ fun AdminDashboardScreenV2(
         mutableLongStateOf(0L)
     }
 
-    var totalVisibleMerchantBalance by remember {
-        mutableLongStateOf(0L)
+    var averageLatencyText by remember {
+        mutableStateOf("0 ms")
     }
 
-    LaunchedEffect(Unit) {
+    var p95LatencyText by remember {
+        mutableStateOf("0 ms")
+    }
+
+    var throughputText by remember {
+        mutableStateOf("0.0 req/s")
+    }
+
+    var averageLatencyProgress by remember {
+        mutableFloatStateOf(0f)
+    }
+
+    var p95LatencyProgress by remember {
+        mutableFloatStateOf(0f)
+    }
+
+    var throughputProgress by remember {
+        mutableFloatStateOf(0f)
+    }
+
+    suspend fun refreshAdminDashboardData() {
         try {
-            isLoading = true
             errorMessage = ""
 
             val merchantResponse = RetrofitClient.api.getMerchants()
@@ -341,17 +367,13 @@ fun AdminDashboardScreenV2(
 
             inactiveMerchantCount = if (allMerchants.size >= BASELINE_MERCHANT_COUNT) {
                 allMerchants.count {
-                    it.status.equals("INACTIVE", ignoreCase = true)
+                    !it.status.equals("ACTIVE", ignoreCase = true)
                 }
             } else {
                 (BASELINE_MERCHANT_COUNT - activeMerchantCount).coerceAtLeast(0)
             }
 
             totalActiveMerchantBalance = activeMerchants.sumOf {
-                it.balance
-            }
-
-            totalVisibleMerchantBalance = allMerchants.sumOf {
                 it.balance
             }
 
@@ -392,6 +414,33 @@ fun AdminDashboardScreenV2(
             errorMessage = e.message ?: "Sebagian data belum dapat dimuat."
         } finally {
             isLoading = false
+        }
+
+        try {
+            metricsErrorMessage = ""
+
+            val rawMetrics = RetrofitClient.api.getMetrics().string()
+            val parsedMetrics = BaselineMetricsParser.parse(rawMetrics)
+
+            averageLatencyText = "${parsedMetrics.averageLatencyMs} ms"
+            p95LatencyText = "${parsedMetrics.p95LatencyMs} ms"
+            throughputText = "${String.format(Locale.US, "%.1f", parsedMetrics.throughputReqPerSecond)} req/s"
+
+            averageLatencyProgress = (parsedMetrics.averageLatencyMs / 2500f).coerceIn(0f, 1f)
+            p95LatencyProgress = (parsedMetrics.p95LatencyMs / 4000f).coerceIn(0f, 1f)
+            throughputProgress = (parsedMetrics.throughputReqPerSecond / 10f).toFloat().coerceIn(0f, 1f)
+        } catch (e: Exception) {
+            metricsErrorMessage = e.message ?: "Metrics belum dapat dimuat dari endpoint /metrics."
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        isLoading = true
+        refreshAdminDashboardData()
+
+        while (true) {
+            delay(5000)
+            refreshAdminDashboardData()
         }
     }
 
@@ -482,13 +531,8 @@ fun AdminDashboardScreenV2(
                     )
 
                     AdminInfoRowV2(
-                        label = "Merchant Operasional",
-                        value = "Merchant berstatus ACTIVE digunakan untuk validasi QRIS"
-                    )
-
-                    AdminInfoRowV2(
-                        label = "Tujuan Monitoring",
-                        value = "Membandingkan latency, throughput, error rate, dan timeout rate sebelum optimasi."
+                        label = "Sumber Metrics",
+                        value = "Endpoint /metrics baseline backend"
                     )
                 }
             }
@@ -508,7 +552,7 @@ fun AdminDashboardScreenV2(
                 text = if (isLoading) {
                     "Memuat data dari backend baseline..."
                 } else {
-                    "Data dirangkum dari endpoint merchant dan transaksi baseline backend."
+                    "Data dirangkum dari endpoint merchant, transaksi, dan metrics baseline backend."
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = AppColor.TextGray
@@ -632,8 +676,8 @@ fun AdminDashboardScreenV2(
 
                 AdminMetricCardV2(
                     title = "Throughput",
-                    value = estimateThroughputV2(totalTransactions),
-                    subtitle = "Simulasi req/s",
+                    value = throughputText,
+                    subtitle = "Dari /metrics",
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -660,129 +704,39 @@ fun AdminDashboardScreenV2(
                 ) {
                     AdminProgressMetricV2(
                         title = "Average Latency",
-                        value = estimateAverageLatencyV2(totalTransactions, failedCount, timeoutCount),
-                        progress = estimateLatencyProgressV2(totalTransactions, failedCount, timeoutCount)
+                        value = averageLatencyText,
+                        progress = averageLatencyProgress
                     )
 
                     Spacer(modifier = Modifier.height(14.dp))
 
                     AdminProgressMetricV2(
                         title = "P95 Latency",
-                        value = estimateP95LatencyV2(totalTransactions, failedCount, timeoutCount),
-                        progress = estimateP95ProgressV2(totalTransactions, failedCount, timeoutCount)
+                        value = p95LatencyText,
+                        progress = p95LatencyProgress
                     )
 
                     Spacer(modifier = Modifier.height(14.dp))
 
                     AdminProgressMetricV2(
                         title = "Throughput",
-                        value = estimateThroughputV2(totalTransactions),
-                        progress = estimateThroughputProgressV2(totalTransactions)
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            Text(
-                text = "Redis & Async Queue Monitoring",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color = AppColor.TextDark
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(24.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
-            ) {
-                Column(
-                    modifier = Modifier.padding(18.dp)
-                ) {
-                    AdminInfoRowV2(
-                        label = "Redis Cache",
-                        value = "OFF pada baseline"
+                        value = throughputText,
+                        progress = throughputProgress
                     )
 
-                    AdminInfoRowV2(
-                        label = "Cache State",
-                        value = "Direct request ke mock legacy"
-                    )
-
-                    AdminInfoRowV2(
-                        label = "RabbitMQ Queue",
-                        value = "OFF pada baseline"
-                    )
-
-                    AdminInfoRowV2(
-                        label = "Async Task",
-                        value = "Logging, audit trail, dan notifikasi dipantau sebagai proses non-kritis"
-                    )
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    Text(
-                        text = "Saat mode optimized aktif, bagian ini dapat menampilkan cache HIT/MISS, queue pending, processed jobs, dan failed jobs.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = AppColor.TextGray
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            Text(
-                text = "Live QRIS / Transaction Traffic",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color = AppColor.TextDark
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-        }
-
-        if (transactions.isEmpty()) {
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(24.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(18.dp)
-                    ) {
-                        Text(
-                            text = "Belum ada transaksi",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = AppColor.TextDark
-                        )
-
-                        Spacer(modifier = Modifier.height(6.dp))
+                    if (metricsErrorMessage.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(12.dp))
 
                         Text(
-                            text = "Jalankan transaksi QRIS atau transfer dari user app untuk melihat traffic transaksi di dashboard admin.",
+                            text = "Metrics belum dapat dimuat dari endpoint /metrics.",
                             style = MaterialTheme.typography.bodySmall,
-                            color = AppColor.TextGray
+                            color = Color(0xFFC62828)
                         )
                     }
                 }
-
-                Spacer(modifier = Modifier.height(22.dp))
             }
-        } else {
-            items(transactions.take(8)) { transaction ->
-                AdminTransactionItemV2(transaction = transaction)
-                Spacer(modifier = Modifier.height(10.dp))
-            }
-        }
 
-        item {
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(24.dp))
 
             Text(
                 text = "Audit Log Transaksi",
@@ -997,114 +951,61 @@ private fun AdminProgressMetricV2(
 }
 
 @Composable
-private fun AdminTransactionItemV2(
-    transaction: TransactionData
-) {
-    val type = transaction.transactionType.uppercase()
-    val isSuccess = transaction.status.uppercase() == "SUCCESS"
-
-    val title = when (type) {
-        "QRIS" -> "QRIS ke ${transaction.merchantName}"
-        "TRANSFER" -> "Transfer ke ${transaction.recipientUserName ?: transaction.merchantName}"
-        else -> transaction.merchantName
-    }
-
-    val subtitle = when (type) {
-        "QRIS" -> "Payment QRIS • ${formatAdminDisplayTimeV2(transaction.createdAt)}"
-        "TRANSFER" -> "Transfer saldo • ${formatAdminDisplayTimeV2(transaction.createdAt)}"
-        else -> "Transaksi • ${formatAdminDisplayTimeV2(transaction.createdAt)}"
-    }
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(
-                modifier = Modifier.weight(1f)
-            ) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = AppColor.TextDark
-                )
-
-                Spacer(modifier = Modifier.height(3.dp))
-
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = AppColor.TextGray
-                )
-
-                Spacer(modifier = Modifier.height(3.dp))
-
-                Text(
-                    text = "Ref: ${transaction.referenceNo ?: transaction.transactionId}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = AppColor.TextGray
-                )
-            }
-
-            Column(
-                horizontalAlignment = Alignment.End
-            ) {
-                Text(
-                    text = formatRupiah(transaction.amount),
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = AppColor.TextDark
-                )
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                Text(
-                    text = if (isSuccess) "SUCCESS" else transaction.status,
-                    style = MaterialTheme.typography.bodySmall,
-                    fontWeight = FontWeight.Bold,
-                    color = if (isSuccess) {
-                        Color(0xFF008A3D)
-                    } else {
-                        Color(0xFFC62828)
-                    }
-                )
-            }
-        }
-    }
-}
-
-@Composable
 private fun AdminAuditLogItemV2(
     transaction: TransactionData
 ) {
-    val type = transaction.transactionType.uppercase()
+    val eventType = "TRANSACTION"
 
-    val eventName = when {
-        transaction.status.uppercase() != "SUCCESS" -> "TRANSACTION_FAILED"
-        type == "QRIS" -> "QRIS_PAYMENT_SUCCESS"
-        type == "TRANSFER" -> "TRANSFER_COMPLETED"
-        else -> "TRANSACTION_COMPLETED"
+    val eventSubType = when (transaction.transactionType.trim().uppercase()) {
+        "QRIS" -> "QRIS_PAYMENT"
+        "TRANSFER" -> "TRANSFER"
+        "REFUND" -> "REVERSAL"
+        else -> "BASELINE_TRANSACTION"
     }
 
-    val message = when (type) {
-        "QRIS" -> "User ${transaction.userId} membayar ${formatRupiah(transaction.amount)} ke ${transaction.merchantName}"
-        "TRANSFER" -> "User ${transaction.userId} transfer ${formatRupiah(transaction.amount)} ke ${transaction.recipientUserName ?: transaction.recipientUserId}"
-        else -> "Transaksi ${formatRupiah(transaction.amount)} tercatat"
+    val status = transaction.status.trim().uppercase().ifBlank {
+        "UNKNOWN"
+    }
+
+    val message = when (status) {
+        "SUCCESS" -> "Transaction successful"
+        "FAILED" -> "Transaction failed"
+        "TIMEOUT" -> "legacy core returned TIMEOUT"
+        "SYSTEM_BUSY" -> "legacy core returned SYSTEM_BUSY"
+        "INVALID_REQUEST" -> "invalid transaction request"
+        "INSUFFICIENT_BALANCE" -> "insufficient balance"
+        "MERCHANT_NOT_FOUND" -> "merchant not found"
+        "USER_NOT_FOUND" -> "user not found"
+        else -> "legacy core returned $status"
+    }
+
+    val referenceValue = transaction.referenceNo
+        ?.takeIf { it.isNotBlank() && it.lowercase() != "null" }
+        ?: transaction.transactionId
+
+    val payload = when (eventSubType) {
+        "QRIS_PAYMENT" -> {
+            "user_id=${transaction.userId}, merchant=${safeAdminAuditValue(transaction.merchantName)}, amount=${transaction.amount}, reference_no=$referenceValue"
+        }
+
+        "TRANSFER" -> {
+            "user_id=${transaction.userId}, recipient=${safeAdminAuditValue(transaction.recipientUserName ?: transaction.recipientUserId.toString())}, amount=${transaction.amount}, reference_no=$referenceValue"
+        }
+
+        "REVERSAL" -> {
+            "user_id=${transaction.userId}, amount=${transaction.amount}, reference_no=$referenceValue"
+        }
+
+        else -> {
+            "user_id=${transaction.userId}, amount=${transaction.amount}, reference_no=$referenceValue"
+        }
     }
 
     Column(
         modifier = Modifier.fillMaxWidth()
     ) {
         Text(
-            text = eventName,
+            text = "$eventType / $eventSubType",
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.Bold,
             color = AppColor.TextDark
@@ -1113,7 +1014,20 @@ private fun AdminAuditLogItemV2(
         Spacer(modifier = Modifier.height(4.dp))
 
         Text(
-            text = message,
+            text = "Status: $status",
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.SemiBold,
+            color = if (status == "SUCCESS") {
+                Color(0xFF008A3D)
+            } else {
+                Color(0xFFC62828)
+            }
+        )
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        Text(
+            text = "Message: $message",
             style = MaterialTheme.typography.bodySmall,
             color = AppColor.TextGray
         )
@@ -1121,11 +1035,27 @@ private fun AdminAuditLogItemV2(
         Spacer(modifier = Modifier.height(4.dp))
 
         Text(
-            text = "${formatAdminDisplayTimeV2(transaction.createdAt)} • Ref: ${transaction.referenceNo ?: transaction.transactionId}",
+            text = "Payload: $payload",
+            style = MaterialTheme.typography.bodySmall,
+            color = AppColor.TextGray
+        )
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        Text(
+            text = "Created At: ${formatAdminDisplayTimeV2(transaction.createdAt)}",
             style = MaterialTheme.typography.bodySmall,
             color = AppColor.TextGray
         )
     }
+}
+
+private fun safeAdminAuditValue(
+    value: String
+): String {
+    return value
+        .takeIf { it.isNotBlank() && it.lowercase() != "null" }
+        ?: "-"
 }
 
 @Composable
@@ -1213,65 +1143,6 @@ private fun calculateRateV2(
 ): Double {
     if (total == 0) return 0.0
     return (value.toDouble() / total.toDouble()) * 100.0
-}
-
-private fun estimateAverageLatencyV2(
-    totalTransactions: Int,
-    failedCount: Int,
-    timeoutCount: Int
-): String {
-    val base = 780
-    val loadPenalty = totalTransactions * 18
-    val failurePenalty = failedCount * 60
-    val timeoutPenalty = timeoutCount * 180
-    val result = base + loadPenalty + failurePenalty + timeoutPenalty
-    return "$result ms"
-}
-
-private fun estimateP95LatencyV2(
-    totalTransactions: Int,
-    failedCount: Int,
-    timeoutCount: Int
-): String {
-    val base = 1180
-    val loadPenalty = totalTransactions * 26
-    val failurePenalty = failedCount * 85
-    val timeoutPenalty = timeoutCount * 260
-    val result = base + loadPenalty + failurePenalty + timeoutPenalty
-    return "$result ms"
-}
-
-private fun estimateThroughputV2(
-    totalTransactions: Int
-): String {
-    if (totalTransactions == 0) return "0 req/s"
-    val throughput = (totalTransactions / 4.0).coerceAtLeast(1.0)
-    return "${String.format(Locale.US, "%.1f", throughput)} req/s"
-}
-
-private fun estimateLatencyProgressV2(
-    totalTransactions: Int,
-    failedCount: Int,
-    timeoutCount: Int
-): Float {
-    val value = 780 + totalTransactions * 18 + failedCount * 60 + timeoutCount * 180
-    return (value / 2200f).coerceIn(0f, 1f)
-}
-
-private fun estimateP95ProgressV2(
-    totalTransactions: Int,
-    failedCount: Int,
-    timeoutCount: Int
-): Float {
-    val value = 1180 + totalTransactions * 26 + failedCount * 85 + timeoutCount * 260
-    return (value / 3200f).coerceIn(0f, 1f)
-}
-
-private fun estimateThroughputProgressV2(
-    totalTransactions: Int
-): Float {
-    if (totalTransactions == 0) return 0f
-    return (totalTransactions / 40f).coerceIn(0f, 1f)
 }
 
 private fun parseAdminTimeMillisV2(
