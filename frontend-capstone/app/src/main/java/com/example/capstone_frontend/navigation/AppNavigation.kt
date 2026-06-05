@@ -44,15 +44,6 @@ fun AppNavigation() {
         ).show()
     }
 
-    fun isInsufficientBalance(status: String, code: String?): Boolean {
-        return status == "INSUFFICIENT_BALANCE" || (status == "FAILED" && code == "51")
-    }
-
-    fun isInvalidTarget(status: String, code: String?): Boolean {
-        return status in listOf("MERCHANT_NOT_FOUND", "USER_NOT_FOUND", "INVALID_INPUT", "INVALID_REQUEST") ||
-                code in listOf("14", "15")
-    }
-
     NavHost(
         navController = navController,
         startDestination = "splash"
@@ -245,15 +236,11 @@ fun AppNavigation() {
                                     }
                                 }
 
-                                "INSUFFICIENT_BALANCE", "FAILED" -> {
-                                    if (isInsufficientBalance(paymentResponse.status, paymentResponse.code)) {
-                                        showToast("Saldo tidak mencukupi.")
-                                    } else {
-                                        showToast("Pembayaran QRIS gagal: ${paymentResponse.message ?: paymentResponse.status}")
-                                    }
+                                "INSUFFICIENT_BALANCE" -> {
+                                    showToast("Saldo tidak mencukupi.")
                                 }
 
-                                "MERCHANT_NOT_FOUND", "INVALID_REQUEST" -> {
+                                "MERCHANT_NOT_FOUND" -> {
                                     showToast("Merchant tidak ditemukan.")
                                 }
 
@@ -334,15 +321,11 @@ fun AppNavigation() {
                                     }
                                 }
 
-                                "INSUFFICIENT_BALANCE", "FAILED" -> {
-                                    if (isInsufficientBalance(paymentResponse.status, paymentResponse.code)) {
-                                        showToast("Saldo tidak mencukupi.")
-                                    } else {
-                                        showToast("Transfer gagal: ${paymentResponse.message ?: paymentResponse.status}")
-                                    }
+                                "INSUFFICIENT_BALANCE" -> {
+                                    showToast("Saldo tidak mencukupi.")
                                 }
 
-                                "USER_NOT_FOUND", "INVALID_INPUT", "INVALID_REQUEST" -> {
+                                "USER_NOT_FOUND", "INVALID_INPUT" -> {
                                     showToast(paymentResponse.message ?: "User penerima tidak ditemukan.")
                                 }
 
