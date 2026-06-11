@@ -838,6 +838,10 @@ func (s *TransactionService) GetTransactionStatus(transactionID int) Transaction
 
 	result.Data = data
 	result.LegacyLatency = time.Since(start).Milliseconds()
+	cacheItem := txStatusCacheItem{Data: data}
+	if cachedData, err := json.Marshal(cacheItem); err == nil {
+		SetCache(cacheKey, string(cachedData), txStatusCacheTTL)
+	}
 	result.AuditID = s.recordInquiryAudit(req.Type, transactionID, result.Status, result.Message, fmt.Sprintf("transaction_id=%d ref=%s profile=%s", transactionID, req.ReferenceNo, profile))
 	return result
 }
